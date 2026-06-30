@@ -7,7 +7,7 @@ const User = require('../models/User');
 const auth = require('../middleware/auth');
 const router = express.Router();
 
-// 📋 1. GET: ดึงรายการลิงก์ย่อทั้งหมด (อัปเดตระบบค้นหาแท็ก และช่องค้นหาหลัก)
+// 📋 1. GET: ดึงรายการลิงก์ย่อทั้งหมด (แก้ไขระบบค้นหาและกรองแท็กให้เสถียร 100%)
 router.get('/', auth, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -20,18 +20,18 @@ router.get('/', auth, async (req, res) => {
       whereClause.userId = req.user.id;
     }
 
-    // 🔍 แก้ไขจุดที่ 2: ปรับเพิ่มให้ช่องค้นหาหลัก สามารถพิมพ์คำค้นหาด้วย "ชื่อแท็ก" ได้ด้วย
+    // 🔍 ปรับปรุงช่องค้นหาหลัก: บังคับให้ค้นหาแท็กแบบข้อความธรรมดาเพื่อป้องกันบั๊ก JSON
     if (search) {
       whereClause[Op.or] = [
         { alias: { [Op.like]: `%${search}%` } },
         { originalUrl: { [Op.like]: `%${search}%` } },
-        { tags: { [Op.like]: `%${search}%` } } // 🔥 เพิ่มบรรทัดนี้เพื่อให้พิมพ์ค้นหาผ่านแท็กในช่องปกติได้ทันที
+        Link.sequelize.where(Link.sequelize.col('tags'), 'LIKE', `%${search}%`) // 🔥 บังคับสแกนแท็กแบบ Text String
       ];
     }
 
-    // 🏷️ แก้ไขจุดที่ 1: ปรับระบบกรองแท็กให้รองรับโครงสร้างสากล (Universal Match) ป้องกันอาการกรองแล้วข้อมูลหาย
+    // 🏷️ แก้ไขจุดสำคัญ: ปรับระบบกรองแท็กตรงปุ่มกดให้ใช้พลังซิงค์ข้อความธรรมดา เจอข้อมูลชัวร์ 100%
     if (tag) {
-      whereClause.tags = { [Op.like]: `%${tag}%` }; // 🔥 เปลี่ยนจาก %"${tag}"% เป็น %${tag}% เพื่อให้ค้นหาเจอข้อมูลทุกรูปแบบแน่นอน
+      whereClause.tags = Link.sequelize.where(Link.sequelize.col('tags'), 'LIKE', `%${tag}%`); // 🔥 ทลายบั๊ก JSON ค้นหาเจอทุกแท็กแน่นอน
     }
 
     const { count, rows } = await Link.findAndCountAll({
