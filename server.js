@@ -1,91 +1,65 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-require('dotenv').config();
-
-// นำเข้าฐานข้อมูลและ Models
 const sequelize = require('./db');
-require('./models/User');
-const Domain = require('./models/Domain');
-const Link = require('./models/Link');
 
-// นำเข้า Routes
-const authRoutes = require('./routes/auth');
-const linkRoutes = require('./routes/links');
+// นำเข้าตัวแปรฐานข้อมูล (Models) เพื่อซิงก์ตาราง
+const User = require('./models/User');
+const Link = require('./models/Link');
+const Domain = require('./models/Domain');
 
 const app = express();
-const PORT = process.env.PORT || 5000;
 
+// ตั้งค่าปูพื้นฐานระบบ
 app.use(cors());
 app.use(express.json());
 
-// ซิงก์ฐานข้อมูล SQLite
-sequelize.authenticate()
-  .then(() => {
-    console.log('✅ SQLite Connected!');
-    return sequelize.sync({ alter: true });
-  })
-  .then(() => console.log('📦 Database Tables Synced Successfully!'))
-  .catch((err) => console.error('❌ Database Error:', err));
+// 🔌 เชื่อมต่อ API เส้นทางต่างๆ ของระบบ Yoalink
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/links', require('./routes/links'));
+app.use('/api/domains', require('./routes/domains'));
+app.use('/api/admin', require('./routes/admin')); // เส้นทางผู้ดูแลระบบ CRUD สมาชิก
 
-// ลงทะเบียน API
-app.use('/api/auth', authRoutes);
-app.use('/api/links', linkRoutes);
-
-// API โดเมนสำหรับแท็บ Bulk Edit
-const auth = require('./middleware/auth');
-app.get('/api/domains', auth, async (req, res) => {
-  const domains = await Domain.findAll({ where: { createdBy: req.user.id } });
-  res.json(domains);
-});
-app.put('/api/domains/:id', auth, async (req, res) => {
-  const domain = await Domain.findOne({ where: { id: req.params.id, createdBy: req.user.id } });
-  if (!domain) return res.status(404).json({ message: 'ไม่พบโดเมน' });
-  domain.name = req.body.name;
-  await domain.save();
-  res.json({ message: 'อัปเดต Root Domain สำเร็จ ลิงก์ย่อลูกๆ สลับตามทั้งหมด!', domain });
-});
-
-// ⚠️ Redirect Engine ร่างทอง (แกะและประกอบลิงก์กลับไปหาเว็บปลายทาง)
+// 🚀 🔥 [จุดแก้ไขแก้บั๊กกดเข้าลิงก์ไม่ได้]: ฟังก์ชันดักจับลิงก์ย่อเพื่อประกอบร่างทำ Redirect (ต้องอยู่ก่อนพอร์ตฟังระบบ)
 app.get('/:alias', async (req, res) => {
   try {
     const { alias } = req.params;
-    const link = await Link.findOne({
-      where: { alias },
-      include: [Domain]
-    });
-
-    if (link) {
-      link.clicks += 1;
-      await link.save();
-
-      // ดึงชื่อโดเมนหลักปัจจุบันจากตาราง Domain มาประกอบร่าง
-      // เพื่อให้เวลาเราเปลี่ยน Root Domain ลิงก์นี้จะวิ่งไปโดเมนใหม่ทันที!
-      const currentDomain = link.Domain ? link.Domain.name : '';
-      
-      // หา Path เดิมที่ตัดโดเมนออก (เช่น /register1)
-      const urlObj = new URL(link.originalUrl);
-      const urlPath = urlObj.pathname;
-
-      // ประกอบร่าง: โดเมนใหม่ + Path เดิม + Parameter เดิมที่เซฟไว้
-      let finalRedirectUrl = `${currentDomain}${urlPath}${link.parameter || ''}`;
-      
-      // ตรวจสอบชัวร์ๆ ว่ามีโปรโตคอลนำหน้า
-      if (!/^https?:\/\//i.test(finalRedirectUrl)) {
-        finalRedirectUrl = 'https://' + finalRedirectUrl;
-      }
-
-      return res.redirect(finalRedirectUrl);
+    
+    // ค้นหาพิกัดลิงก์ในระบบด้วยชื่อย่อ (พิมพ์เล็ก)
+    const link = await Link.findOne({ where: { alias: alias.toLowerCase() } });
+    
+    if (!link) {
+      // แจ้งเตือนสไตล์คลีนๆ เมื่อไม่พบลิงก์ในระบบ
+      return res.status(404).send(
+        `<div style="text-align:center; margin-top:100px; font-family:sans-serif;">
+          <h1 style="color:#EB568E; font-size:48px;">❌ 404 Not Found</h1>
+          <p style="color:#C9CED6; font-size:18px;">ไม่พบลิงก์ย่อนี้ในระบบ Yoalink.com หรือลิงก์อาจถูกลบไปแล้ว</p>
+         </div>`
+      );
     }
 
-    return res.status(404).send(`
-      <div style="background:#0B101B;color:#C9CED6;font-family:sans-serif;text-align:center;padding:100px;min-height:100vh;margin:0;">
-        <h1 style="color:#EB568E;font-size:48px;margin-bottom:10px;">404 Not Found</h1>
-        <p style="font-size:18px;">ไม่พบชื่อย่อ <b>/${alias}</b> ในระบบ TeamLinks Pro</p>
-      </div>
-    `);
+    // อัปเดตยอดสถิติการคลิกเพิ่มขึ้นทีละ 1
+    link.clicks += 1;
+    await link.save();
+
+    // 🎯 ประกอบร่างคืนชีพ URL: เอาโครงสร้างหลักมาผูกต่อพารามิเตอร์ (?action=register...)
+    const finalUrl = link.originalUrl + (link.parameter || '');
+    
+    // วาร์ปเบราว์เซอร์ผู้ใช้งานพุ่งตรงไปยังเป้าหมายทันที!
+    res.redirect(finalUrl);
   } catch (error) {
-    res.status(500).send('Server Error');
+    console.error('Redirect Error:', error);
+    res.status(500).send('<h1 style="text-align:center; margin-top:100px;">🛠️ 500 Internal Server Error</h1>');
   }
 });
 
-app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
+// 📦 สั่งซิงก์โครงสร้างตารางเข้าฐานข้อมูล SQLite และสั่งรันเซิร์ฟเวอร์
+const PORT = 5000;
+sequelize.sync({ alter: true }).then(() => {
+  console.log('📦 Database Tables Synced Successfully!');
+  app.listen(PORT, () => {
+    console.log(`🚀 Yoalink Core Backend running on port ${PORT}`);
+  });
+}).catch(err => {
+  console.error('❌ Failed to sync database:', err);
+});
