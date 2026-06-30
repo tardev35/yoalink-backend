@@ -11,7 +11,9 @@ const isAdmin = async (req, res, next) => {
     const user = await User.findByPk(req.user.id);
     if (user.role !== 'admin') return res.status(403).json({ message: 'Access Denied: Admin only' });
     next();
-  } catch (error) { res.status(500).json({ message: 'Server Error' }); }
+  } catch (error) { 
+    res.status(500).json({ message: 'Server Error' }); 
+  }
 };
 
 // ==========================================
@@ -51,12 +53,24 @@ router.get('/domains', [auth, isAdmin], async (req, res) => {
   } catch (error) { res.status(500).json({ message: 'Error fetching domains' }); }
 });
 
+// ➕ เทสและรีวิวเพิ่มฟังก์ชัน: รองรับการสร้างโดเมนใหม่ตรงจากปุ่มเขียวหน้าบ้าน
+router.post('/domains', [auth, isAdmin], async (req, res) => {
+  try {
+    const { name } = req.body;
+    const exist = await Domain.findOne({ where: { name } });
+    if (exist) return res.status(400).json({ message: 'โดเมนนี้มีอยู่ในระบบแล้ว' });
+    
+    const newDomain = await Domain.create({ name, createdBy: req.user.id });
+    res.status(201).json(newDomain);
+  } catch (error) { res.status(500).json({ message: 'Error creating domain' }); }
+});
+
 router.put('/domains/:id', [auth, isAdmin], async (req, res) => {
   try {
     const domain = await Domain.findByPk(req.params.id);
     if (!domain) return res.status(404).json({ message: 'ไม่พบโดเมน' });
     domain.name = req.body.name;
-    await domain.save(); // 🔥 เมื่อเซฟตรงนี้ ทุกลิงก์ที่ผูกกับ ID นี้จะแสดงชื่อใหม่ทันที!
+    await domain.save(); 
     res.json({ message: 'อัปเดตโดเมนสำเร็จ' });
   } catch (error) { res.status(500).json({ message: 'Error updating domain' }); }
 });
@@ -89,7 +103,7 @@ router.put('/tags', [auth, isAdmin], async (req, res) => {
     for (let link of links) {
       if (link.tags && link.tags.includes(oldTag)) {
         link.tags = link.tags.map(t => t === oldTag ? newTag : t);
-        link.changed('tags', true); // บังคับให้ Sequelize รู้ว่า JSON มีการเปลี่ยนแปลง
+        link.changed('tags', true); 
         await link.save();
       }
     }
