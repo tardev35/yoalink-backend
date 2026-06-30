@@ -11,9 +11,10 @@ const User = require('./models/User');
 const Link = require('./models/Link');
 const Domain = require('./models/Domain');
 const LinkChannelStat = require('./models/LinkChannelStat'); 
-const LinkClickLog = require('./models/LinkClickLog'); // 🔥 นำเข้าโมเดลเก็บ Log เวลาคลิก
+const LinkClickLog = require('./models/LinkClickLog'); 
+const LinkClickDevice = require('./models/LinkClickDevice'); // 🔥 โมดูล 3: นำเข้าตารางอุปกรณ์ตัวใหม่
 
-// 🤝 ประกาศผูกความสัมพันธ์ระหว่างตาราง
+// 🤝 ประกาศผูกความสัมพันธ์ระหว่างตาราง (Associations)
 Link.belongsTo(User, { foreignKey: 'userId' });
 User.hasMany(Link, { foreignKey: 'userId' });
 Link.belongsTo(Domain, { foreignKey: 'domainId' });
@@ -22,9 +23,12 @@ Domain.hasMany(Link, { foreignKey: 'domainId' });
 Link.hasMany(LinkChannelStat, { foreignKey: 'linkId', onDelete: 'CASCADE' });
 LinkChannelStat.belongsTo(Link, { foreignKey: 'linkId' });
 
-// 🔥 ผูกความสัมพันธ์ตารางประวัติเวลาคลิก
 Link.hasMany(LinkClickLog, { foreignKey: 'linkId', onDelete: 'CASCADE' });
 LinkClickLog.belongsTo(Link, { foreignKey: 'linkId' });
+
+// 🔥 โมดูล 3: ผูกความสัมพันธ์ตารางสถิติอุปกรณ์
+Link.hasMany(LinkClickDevice, { foreignKey: 'linkId', onDelete: 'CASCADE' });
+LinkClickDevice.belongsTo(Link, { foreignKey: 'linkId' });
 
 const app = express();
 app.use(helmet()); 
@@ -47,7 +51,7 @@ app.use('/api/links', require('./routes/links'));
 app.use('/api/domains', require('./routes/domains'));
 app.use('/api/admin', require('./routes/admin'));
 
-// 🚀 ระบบ Redirect ลิงก์ย่อ + ดักจับพารามิเตอร์การตลาด และบันทึกเวลาทองคอม (Module 2)
+// 🚀 ระบบ Redirect ลิงก์ย่อ + ดักจับพารามิเตอร์ช่องทาง + บันทึกเวลา + วิเคราะห์คัดแยกอุปกรณ์ (Module 3)
 app.get('/:alias', async (req, res) => {
   try {
     const { alias } = req.params;
@@ -61,7 +65,7 @@ app.get('/:alias', async (req, res) => {
     link.clicks += 1;
     await link.save();
 
-    // 2. แกะรอยค่ายการตลาด
+    // 2. แกะรอยค่ายการตลาด (Module 1)
     let rawSrc = (req.query.src || '').toLowerCase().trim();
     let targetChannel = 'organic/direct'; 
 
@@ -71,7 +75,6 @@ app.get('/:alias', async (req, res) => {
     else if (rawSrc === 'sms') targetChannel = 'sms';
     else if (rawSrc === 'seo') targetChannel = 'seo';
 
-    // บันทึกลงตารางสรุปค่าย (Module 1)
     const [statRecord, created] = await LinkChannelStat.findOrCreate({
       where: { linkId: link.id, channel: targetChannel },
       defaults: { clicks: 1 }
@@ -81,13 +84,34 @@ app.get('/:alias', async (req, res) => {
       await statRecord.save();
     }
 
-    // 🔥 บันทึกประวัติเวลาคลิกสดๆ ลงตาราง Log (Module 2)
+    // 3. บันทึกประวัติเวลาคลิก (Module 2)
     await LinkClickLog.create({
       linkId: link.id,
       channel: targetChannel
     });
 
-    // 3. ประกอบ URL พ่วงพารามิเตอร์ยิงส่งต่อไปให้เว็บหลัก
+    // 4. 🔥 โมดูล 3: ดักจับและคัดแยกกลุ่มระบบปฏิบัติการ (User-Agent Sniffer)
+    const ua = req.get('user-agent') || '';
+    let detectedPlatform = 'Other';
+
+    if (/iphone|ipad|ipod/i.test(ua)) {
+      detectedPlatform = 'iOS';
+    } else if (/android/i.test(ua)) {
+      detectedPlatform = 'Android';
+    } else if (/windows|macintosh|linux/i.test(ua)) {
+      detectedPlatform = 'Desktop';
+    }
+
+    const [devRecord, devCreated] = await LinkClickDevice.findOrCreate({
+      where: { linkId: link.id, platform: detectedPlatform },
+      defaults: { clicks: 1 }
+    });
+    if (!devCreated) {
+      devRecord.clicks += 1;
+      await devRecord.save();
+    }
+
+    // 5. ประกอบ URL พ่วงพารามิเตอร์ยิงส่งต่อไปให้เว็บหลัก
     let finalUrl = link.originalUrl + (link.parameter || '');
     if (targetChannel !== 'organic/direct') {
       const joinChar = finalUrl.includes('?') ? '&' : '?';

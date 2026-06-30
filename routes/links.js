@@ -7,7 +7,7 @@ const User = require('../models/User');
 const auth = require('../middleware/auth');
 const router = express.Router();
 
-// 📋 1. GET: ดึงรายการลิงก์ย่อทั้งหมด (แก้ไขระบบค้นหาและกรองแท็กให้เสถียร 100%)
+// 📋 1. GET: ดึงรายการลิงก์ย่อทั้งหมด
 router.get('/', auth, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -20,18 +20,16 @@ router.get('/', auth, async (req, res) => {
       whereClause.userId = req.user.id;
     }
 
-    // 🔍 ปรับปรุงช่องค้นหาหลัก: บังคับให้ค้นหาแท็กแบบข้อความธรรมดาเพื่อป้องกันบั๊ก JSON
     if (search) {
       whereClause[Op.or] = [
         { alias: { [Op.like]: `%${search}%` } },
         { originalUrl: { [Op.like]: `%${search}%` } },
-        Link.sequelize.where(Link.sequelize.col('tags'), 'LIKE', `%${search}%`) // 🔥 บังคับสแกนแท็กแบบ Text String
+        Link.sequelize.where(Link.sequelize.col('tags'), 'LIKE', `%${search}%`)
       ];
     }
 
-    // 🏷️ แก้ไขจุดสำคัญ: ปรับระบบกรองแท็กตรงปุ่มกดให้ใช้พลังซิงค์ข้อความธรรมดา เจอข้อมูลชัวร์ 100%
     if (tag) {
-      whereClause.tags = Link.sequelize.where(Link.sequelize.col('tags'), 'LIKE', `%${tag}%`); // 🔥 ทลายบั๊ก JSON ค้นหาเจอทุกแท็กแน่นอน
+      whereClause.tags = Link.sequelize.where(Link.sequelize.col('tags'), 'LIKE', `%${tag}%`);
     }
 
     const { count, rows } = await Link.findAndCountAll({
@@ -144,10 +142,10 @@ router.delete('/:id', auth, async (req, res) => {
     res.status(500).json({ message: 'Error deleting link' });
   }
 });
-/* เพิ่มไว้ใน backend/routes/links.js ก่อนบรรทัด module.exports = router; */
+
 const LinkChannelStat = require('../models/LinkChannelStat');
 
-// 📊 GET: คำนวณเปอร์เซ็นต์สถิติ 5 ช่องทางหลักส่งให้หน้าบ้านทำกราฟวงกลม/กราฟแท่ง
+// 📊 4. GET: ดึงสถิติคัดแยกช่องทางมาร์เก็ตติ้ง (Module 1)
 router.get('/:id/channel-stats', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
@@ -155,22 +153,10 @@ router.get('/:id/channel-stats', auth, async (req, res) => {
       if (!link) return res.status(403).json({ message: 'คุณไม่มีสิทธิ์เข้าถึงข้อมูลลิงก์ชิ้นนี้' });
     }
 
-    // ดึงสถิติช่องทางทั้งหมดของลิงก์นี้
-    const channelRows = await LinkChannelStat.findAll({
-      where: { linkId: req.params.id }
-    });
-
-    // เตรียมโครงสร้าง 5 ช่องทางหลักบังคับแสดงผล (แม้ยังไม่มีคนคลิกก็ให้ขึ้น 0%)
-    const defaultChannels = {
-      facebook: 0,
-      tiktok: 0,
-      line: 0,
-      sms: 0,
-      seo: 0,
-      'organic/direct': 0
-    };
-
+    const channelRows = await LinkChannelStat.findAll({ where: { linkId: req.params.id } });
+    const defaultChannels = { facebook: 0, tiktok: 0, line: 0, sms: 0, seo: 0, 'organic/direct': 0 };
     let totalChannelClicks = 0;
+
     channelRows.forEach(r => {
       if (defaultChannels[r.channel] !== undefined) {
         defaultChannels[r.channel] = r.clicks;
@@ -178,27 +164,21 @@ router.get('/:id/channel-stats', auth, async (req, res) => {
       }
     });
 
-    // แปลงข้อมูลเป็น Array พร้อมคำนวณสัดส่วน % ให้หน้าบ้านเรนเดอร์แถบสีได้ทันที
     const statsData = Object.keys(defaultChannels).map(ch => {
       const clicks = defaultChannels[ch];
       const percentage = totalChannelClicks > 0 ? Math.round((clicks / totalChannelClicks) * 100) : 0;
       return { channel: ch, clicks, percentage };
     });
 
-    res.json({
-      totalChannelClicks,
-      stats: statsData
-    });
+    res.json({ totalChannelClicks, stats: statsData });
   } catch (error) {
-    console.error('Fetch Channel Stats Error:', error);
     res.status(500).json({ message: 'เกิดข้อผิดพลาดในการคำนวณสถิติช่องทาง' });
   }
 });
 
-/* เพิ่มไว้ใน backend/routes/links.js ก่อนบรรทัด module.exports = router; */
 const LinkClickLog = require('../models/LinkClickLog');
 
-// ⏰ GET: ดึงสถิติวิเคราะห์ช่วงเวลาทองคำ 24 ชั่วโมง และเทรนด์ 7 วันล่าสุด (Module 2)
+// ⏰ 5. GET: ดึงสถิติรายชั่วโมงและรายวันย้อนหลัง (Module 2)
 router.get('/:id/time-stats', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
@@ -206,53 +186,66 @@ router.get('/:id/time-stats', auth, async (req, res) => {
       if (!link) return res.status(403).json({ message: 'คุณไม่มีสิทธิ์เข้าถึงข้อมูลลิงก์ชิ้นนี้' });
     }
 
-    // 1. ดึงข้อมูลดิบของคลิกทั้งหมดในลิงก์นี้
-    const clickLogs = await LinkClickLog.findAll({
-      where: { linkId: req.params.id },
-      attributes: ['createdAt'],
-      raw: true
-    });
-
-    // 2. คำนวณรายชั่วโมง (สร้างบล็อกสล็อต 00 - 23 น. รอไว้เลย)
+    const clickLogs = await LinkClickLog.findAll({ where: { linkId: req.params.id }, attributes: ['createdAt'], raw: true });
     const hourlyGrid = {};
-    for (let i = 0; i < 24; i++) {
-      const hourStr = String(i).padStart(2, '0');
-      hourlyGrid[hourStr] = 0;
-    }
+    for (let i = 0; i < 24; i++) { hourlyGrid[String(i).padStart(2, '0')] = 0; }
 
-    // 3. คำนวณรายวัน 7 วันล่าสุด (สร้างวันรอไว้ล่วงหน้า)
     const dailyGrid = {};
     for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
+      const d = new Date(); d.setDate(d.getDate() - i);
       const dateStr = d.toLocaleDateString('th-TH', { day: '2-digit', month: 'short' });
       dailyGrid[dateStr] = 0;
     }
 
-    // นำประวัติล็อกเวลามานับจัดเข้าหมวดหมู่สล็อตเวลา
     clickLogs.forEach(log => {
       const dateObj = new Date(log.createdAt);
-      
-      // ดักเอาชั่วโมง (เช่น 14)
       const hourStr = String(dateObj.getHours()).padStart(2, '0');
       if (hourlyGrid[hourStr] !== undefined) hourlyGrid[hourStr] += 1;
 
-      // ดักเอาชื่อวัน (เช่น 01 ก.ค.)
       const dateStr = dateObj.toLocaleDateString('th-TH', { day: '2-digit', month: 'short' });
       if (dailyGrid[dateStr] !== undefined) dailyGrid[dateStr] += 1;
     });
 
-    // แปลงผลลัพธ์เป็น Array เพื่อให้หน้าบ้านนำไปลูปทำแผนภูมิได้ง่ายๆ
     const hourlyData = Object.keys(hourlyGrid).map(h => ({ hour: `${h}:00`, clicks: hourlyGrid[h] }));
     const dailyData = Object.keys(dailyGrid).map(d => ({ date: d, clicks: dailyGrid[d] }));
 
-    res.json({
-      hourly: hourlyData,
-      daily: dailyData
-    });
+    res.json({ hourly: hourlyData, daily: dailyData });
   } catch (error) {
-    console.error('Fetch Time Stats Error:', error);
     res.status(500).json({ message: 'เกิดข้อผิดพลาดในการคำนวณช่วงเวลาทองคำ' });
+  }
+});
+
+const LinkClickDevice = require('../models/LinkClickDevice');
+
+// 📱 6. 🔥 โมดูล 3 GET: คำนวณเปอร์เซ็นต์อุปกรณ์ส่งให้หน้าบ้านเรนเดอร์กราฟ (New Endpoint!)
+router.get('/:id/device-stats', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      const link = await Link.findOne({ where: { id: req.params.id, userId: req.user.id } });
+      if (!link) return res.status(403).json({ message: 'คุณไม่มีสิทธิ์เข้าถึงข้อมูลลิงก์ชิ้นนี้' });
+    }
+
+    const deviceRows = await LinkClickDevice.findAll({ where: { linkId: req.params.id } });
+    const defaultDevices = { iOS: 0, Android: 0, Desktop: 0, Other: 0 };
+    let totalDeviceClicks = 0;
+
+    deviceRows.forEach(r => {
+      if (defaultDevices[r.platform] !== undefined) {
+        defaultDevices[r.platform] = r.clicks;
+        totalDeviceClicks += r.clicks;
+      }
+    });
+
+    const statsData = Object.keys(defaultDevices).map(plat => {
+      const clicks = defaultDevices[plat];
+      const percentage = totalDeviceClicks > 0 ? Math.round((clicks / totalDeviceClicks) * 100) : 0;
+      return { platform: plat, clicks, percentage };
+    });
+
+    res.json({ totalDeviceClicks, stats: statsData });
+  } catch (error) {
+    console.error('Fetch Device Stats Error:', error);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดในการดึงข้อมูลอุปกรณ์' });
   }
 });
 
