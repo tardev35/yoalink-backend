@@ -195,4 +195,65 @@ router.get('/:id/channel-stats', auth, async (req, res) => {
   }
 });
 
+/* เพิ่มไว้ใน backend/routes/links.js ก่อนบรรทัด module.exports = router; */
+const LinkClickLog = require('../models/LinkClickLog');
+
+// ⏰ GET: ดึงสถิติวิเคราะห์ช่วงเวลาทองคำ 24 ชั่วโมง และเทรนด์ 7 วันล่าสุด (Module 2)
+router.get('/:id/time-stats', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      const link = await Link.findOne({ where: { id: req.params.id, userId: req.user.id } });
+      if (!link) return res.status(403).json({ message: 'คุณไม่มีสิทธิ์เข้าถึงข้อมูลลิงก์ชิ้นนี้' });
+    }
+
+    // 1. ดึงข้อมูลดิบของคลิกทั้งหมดในลิงก์นี้
+    const clickLogs = await LinkClickLog.findAll({
+      where: { linkId: req.params.id },
+      attributes: ['createdAt'],
+      raw: true
+    });
+
+    // 2. คำนวณรายชั่วโมง (สร้างบล็อกสล็อต 00 - 23 น. รอไว้เลย)
+    const hourlyGrid = {};
+    for (let i = 0; i < 24; i++) {
+      const hourStr = String(i).padStart(2, '0');
+      hourlyGrid[hourStr] = 0;
+    }
+
+    // 3. คำนวณรายวัน 7 วันล่าสุด (สร้างวันรอไว้ล่วงหน้า)
+    const dailyGrid = {};
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toLocaleDateString('th-TH', { day: '2-digit', month: 'short' });
+      dailyGrid[dateStr] = 0;
+    }
+
+    // นำประวัติล็อกเวลามานับจัดเข้าหมวดหมู่สล็อตเวลา
+    clickLogs.forEach(log => {
+      const dateObj = new Date(log.createdAt);
+      
+      // ดักเอาชั่วโมง (เช่น 14)
+      const hourStr = String(dateObj.getHours()).padStart(2, '0');
+      if (hourlyGrid[hourStr] !== undefined) hourlyGrid[hourStr] += 1;
+
+      // ดักเอาชื่อวัน (เช่น 01 ก.ค.)
+      const dateStr = dateObj.toLocaleDateString('th-TH', { day: '2-digit', month: 'short' });
+      if (dailyGrid[dateStr] !== undefined) dailyGrid[dateStr] += 1;
+    });
+
+    // แปลงผลลัพธ์เป็น Array เพื่อให้หน้าบ้านนำไปลูปทำแผนภูมิได้ง่ายๆ
+    const hourlyData = Object.keys(hourlyGrid).map(h => ({ hour: `${h}:00`, clicks: hourlyGrid[h] }));
+    const dailyData = Object.keys(dailyGrid).map(d => ({ date: d, clicks: dailyGrid[d] }));
+
+    res.json({
+      hourly: hourlyData,
+      daily: dailyData
+    });
+  } catch (error) {
+    console.error('Fetch Time Stats Error:', error);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดในการคำนวณช่วงเวลาทองคำ' });
+  }
+});
+
 module.exports = router;

@@ -6,29 +6,30 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const sequelize = require('./db');
 
-// 📦 1. นำเข้าตารางฐานข้อมูลทั้งหมดเข้ามาในระบบก่อน (โหลดให้ครบก่อนเรียกใช้งาน)
+// 📦 นำเข้าตารางฐานข้อมูลทั้งหมด
 const User = require('./models/User');
 const Link = require('./models/Link');
 const Domain = require('./models/Domain');
 const LinkChannelStat = require('./models/LinkChannelStat'); 
+const LinkClickLog = require('./models/LinkClickLog'); // 🔥 นำเข้าโมเดลเก็บ Log เวลาคลิก
 
-// 🤝 2. ประกาศผูกความสัมพันธ์ระหว่างตาราง (Associations) หลังจากโหลดมาครบแล้ว
+// 🤝 ประกาศผูกความสัมพันธ์ระหว่างตาราง
 Link.belongsTo(User, { foreignKey: 'userId' });
 User.hasMany(Link, { foreignKey: 'userId' });
 Link.belongsTo(Domain, { foreignKey: 'domainId' });
 Domain.hasMany(Link, { foreignKey: 'domainId' });
 
-// 🔥 ผูกความสัมพันธ์ตารางสถิติช่องทางมาร์เก็ตติ้ง (Module 1)
 Link.hasMany(LinkChannelStat, { foreignKey: 'linkId', onDelete: 'CASCADE' });
 LinkChannelStat.belongsTo(Link, { foreignKey: 'linkId' });
 
-const app = express();
+// 🔥 ผูกความสัมพันธ์ตารางประวัติเวลาคลิก
+Link.hasMany(LinkClickLog, { foreignKey: 'linkId', onDelete: 'CASCADE' });
+LinkClickLog.belongsTo(Link, { foreignKey: 'linkId' });
 
-// 🛡️ [SECURITY ZONE] เสื้อเกราะป้องกัน API
+const app = express();
 app.use(helmet()); 
 app.disable('x-powered-by'); 
 
-// กฎเหล็กดักบอทยิงรัว
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, 
   max: 150, 
@@ -40,33 +41,27 @@ const apiLimiter = rateLimit({
 app.use(cors());
 app.use(express.json());
 
-// เชื่อมต่อระบบรักษาความปลอดภัยคุมพื้นที่ API
 app.use('/api/', apiLimiter); 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/links', require('./routes/links'));
 app.use('/api/domains', require('./routes/domains'));
 app.use('/api/admin', require('./routes/admin'));
 
-// 🚀 ระบบ Redirect ลิงก์ย่อ + ดักจับพารามิเตอร์การตลาด (?src=xx)
+// 🚀 ระบบ Redirect ลิงก์ย่อ + ดักจับพารามิเตอร์การตลาด และบันทึกเวลาทองคอม (Module 2)
 app.get('/:alias', async (req, res) => {
   try {
     const { alias } = req.params;
     const link = await Link.findOne({ where: { alias: alias.toLowerCase() } });
     
     if (!link) {
-      return res.status(404).send(
-        `<div style="text-align:center; margin-top:100px; font-family:sans-serif;">
-          <h1 style="color:#EB568E; font-size:48px;">❌ 404 Not Found</h1>
-          <p style="color:#C9CED6; font-size:18px;">ไม่พบลิงก์ย่อนี้ในระบบ Yoalink.com หรือลิงก์อาจถูกลบไปแล้ว</p>
-         </div>`
-      );
+      return res.status(404).send(`<h1 style="text-align:center;margin-top:100px;">❌ 404 Not Found</h1>`);
     }
 
-    // 1. บวกยอดคลิกรวมของลิงก์
+    // 1. บวกยอดคลิกรวม
     link.clicks += 1;
     await link.save();
 
-    // 2. แกะรอยพารามิเตอร์คัดแยกช่องทางมาร์เก็ตติ้ง
+    // 2. แกะรอยค่ายการตลาด
     let rawSrc = (req.query.src || '').toLowerCase().trim();
     let targetChannel = 'organic/direct'; 
 
@@ -76,18 +71,23 @@ app.get('/:alias', async (req, res) => {
     else if (rawSrc === 'sms') targetChannel = 'sms';
     else if (rawSrc === 'seo') targetChannel = 'seo';
 
-    // บันทึกลงฐานข้อมูลสถิติช่องทาง
+    // บันทึกลงตารางสรุปค่าย (Module 1)
     const [statRecord, created] = await LinkChannelStat.findOrCreate({
       where: { linkId: link.id, channel: targetChannel },
       defaults: { clicks: 1 }
     });
-
     if (!created) {
       statRecord.clicks += 1;
       await statRecord.save();
     }
 
-    // 3. ประกอบ URL ปลายทางพ่วงพารามิเตอร์ยิงส่งต่อไปให้เว็บหลัก
+    // 🔥 บันทึกประวัติเวลาคลิกสดๆ ลงตาราง Log (Module 2)
+    await LinkClickLog.create({
+      linkId: link.id,
+      channel: targetChannel
+    });
+
+    // 3. ประกอบ URL พ่วงพารามิเตอร์ยิงส่งต่อไปให้เว็บหลัก
     let finalUrl = link.originalUrl + (link.parameter || '');
     if (targetChannel !== 'organic/direct') {
       const joinChar = finalUrl.includes('?') ? '&' : '?';
