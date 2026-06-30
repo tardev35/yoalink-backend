@@ -7,7 +7,7 @@ const User = require('../models/User');
 const auth = require('../middleware/auth');
 const router = express.Router();
 
-// 📋 1. GET: ดึงรายการลิงก์ย่อทั้งหมด
+// 📋 1. GET: ดึงรายการลิงก์ย่อทั้งหมด (อัปเดตระบบค้นหาแท็ก และช่องค้นหาหลัก)
 router.get('/', auth, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -20,15 +20,18 @@ router.get('/', auth, async (req, res) => {
       whereClause.userId = req.user.id;
     }
 
+    // 🔍 แก้ไขจุดที่ 2: ปรับเพิ่มให้ช่องค้นหาหลัก สามารถพิมพ์คำค้นหาด้วย "ชื่อแท็ก" ได้ด้วย
     if (search) {
       whereClause[Op.or] = [
         { alias: { [Op.like]: `%${search}%` } },
-        { originalUrl: { [Op.like]: `%${search}%` } }
+        { originalUrl: { [Op.like]: `%${search}%` } },
+        { tags: { [Op.like]: `%${search}%` } } // 🔥 เพิ่มบรรทัดนี้เพื่อให้พิมพ์ค้นหาผ่านแท็กในช่องปกติได้ทันที
       ];
     }
 
+    // 🏷️ แก้ไขจุดที่ 1: ปรับระบบกรองแท็กให้รองรับโครงสร้างสากล (Universal Match) ป้องกันอาการกรองแล้วข้อมูลหาย
     if (tag) {
-      whereClause.tags = { [Op.like]: `%"${tag}"%` }; 
+      whereClause.tags = { [Op.like]: `%${tag}%` }; // 🔥 เปลี่ยนจาก %"${tag}"% เป็น %${tag}% เพื่อให้ค้นหาเจอข้อมูลทุกรูปแบบแน่นอน
     }
 
     const { count, rows } = await Link.findAndCountAll({
@@ -54,7 +57,7 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-// 🚀 2. POST: สร้างลิงก์ย่อใหม่ (อัปเดตแก้ปัญหา Link.createdBy cannot be null)
+// 🚀 2. POST: สร้างลิงก์ย่อใหม่
 router.post('/', auth, async (req, res) => {
   try {
     let { originalUrl, alias, tags } = req.body;
@@ -103,13 +106,12 @@ router.post('/', auth, async (req, res) => {
       processedTags = tags.split(',').map(t => t.trim().toLowerCase()).filter(t => t !== '');
     }
 
-    // 🔥 บันทึกลงฐานข้อมูลจริง (เติมข้อมูลให้ครบถ้วนเพื่อไม่ให้เกิดการขัดแย้งของเงื่อนไขฐานข้อมูล)
     const newLink = await Link.create({
       originalUrl,
       alias,
       tags: processedTags,
-      userId: req.user.id,      // ผูกความสัมพันธ์ระบบ Model Interceptor
-      createdBy: req.user.id,   // 🔥 เพิ่มบรรทัดนี้เข้ามาเพื่อแก้ปัญหา 'Link.createdBy cannot be null' แบบถาวร
+      userId: req.user.id,      
+      createdBy: req.user.id,   
       domainId: domain.id,
       clicks: 0
     });
