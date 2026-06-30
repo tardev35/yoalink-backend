@@ -144,5 +144,55 @@ router.delete('/:id', auth, async (req, res) => {
     res.status(500).json({ message: 'Error deleting link' });
   }
 });
+/* เพิ่มไว้ใน backend/routes/links.js ก่อนบรรทัด module.exports = router; */
+const LinkChannelStat = require('../models/LinkChannelStat');
+
+// 📊 GET: คำนวณเปอร์เซ็นต์สถิติ 5 ช่องทางหลักส่งให้หน้าบ้านทำกราฟวงกลม/กราฟแท่ง
+router.get('/:id/channel-stats', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      const link = await Link.findOne({ where: { id: req.params.id, userId: req.user.id } });
+      if (!link) return res.status(403).json({ message: 'คุณไม่มีสิทธิ์เข้าถึงข้อมูลลิงก์ชิ้นนี้' });
+    }
+
+    // ดึงสถิติช่องทางทั้งหมดของลิงก์นี้
+    const channelRows = await LinkChannelStat.findAll({
+      where: { linkId: req.params.id }
+    });
+
+    // เตรียมโครงสร้าง 5 ช่องทางหลักบังคับแสดงผล (แม้ยังไม่มีคนคลิกก็ให้ขึ้น 0%)
+    const defaultChannels = {
+      facebook: 0,
+      tiktok: 0,
+      line: 0,
+      sms: 0,
+      seo: 0,
+      'organic/direct': 0
+    };
+
+    let totalChannelClicks = 0;
+    channelRows.forEach(r => {
+      if (defaultChannels[r.channel] !== undefined) {
+        defaultChannels[r.channel] = r.clicks;
+        totalChannelClicks += r.clicks;
+      }
+    });
+
+    // แปลงข้อมูลเป็น Array พร้อมคำนวณสัดส่วน % ให้หน้าบ้านเรนเดอร์แถบสีได้ทันที
+    const statsData = Object.keys(defaultChannels).map(ch => {
+      const clicks = defaultChannels[ch];
+      const percentage = totalChannelClicks > 0 ? Math.round((clicks / totalChannelClicks) * 100) : 0;
+      return { channel: ch, clicks, percentage };
+    });
+
+    res.json({
+      totalChannelClicks,
+      stats: statsData
+    });
+  } catch (error) {
+    console.error('Fetch Channel Stats Error:', error);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดในการคำนวณสถิติช่องทาง' });
+  }
+});
 
 module.exports = router;
