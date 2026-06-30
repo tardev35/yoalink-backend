@@ -9,11 +9,11 @@ const LinkChannelStat = sequelize.define('LinkChannelStat', {
     autoIncrement: true
   },
   linkId: {
-    type: DataTypes.INTEGER,
+    type: DataTypes.UUID, // 🔥 แก้จาก INTEGER เป็น UUID เพื่อให้แมตช์กับคีย์หลักใน Link.js ชัวร์ 100%
     allowNull: false
   },
   channel: {
-    type: DataTypes.STRING, // facebook, tiktok, line, sms, seo, หรือ direct
+    type: DataTypes.STRING, // facebook, tiktok, line, sms, seo, หรือ organic/direct
     allowNull: false
   },
   clicks: {
