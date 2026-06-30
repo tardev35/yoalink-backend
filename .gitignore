@@ -1,0 +1,12 @@
+# Dependencies (โฟลเดอร์ไลบรารี ห้ามเอาขึ้นเด็ดขาด)
+node_modules/
+
+# Environment Variables (ไฟล์เก็บความลับและคีย์ต่างๆ)
+.env
+
+# Database (ไฟล์ฐานข้อมูล SQLite ในเครื่อง)
+database.sqlite
+
+# OS generated files (ไฟล์ขยะของระบบปฏิบัติการ)
+.DS_Store
+Thumbs.db
