@@ -7,7 +7,7 @@ const User = require('../models/User');
 const auth = require('../middleware/auth');
 const router = express.Router();
 
-// 📋 1. GET: ดึงรายการลิงก์ย่อทั้งหมด (แก้ไขปัญหา 500 Error ด้วย distinct: true)
+// 📋 1. GET: ดึงรายการลิงก์ย่อทั้งหมด
 router.get('/', auth, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -37,7 +37,7 @@ router.get('/', auth, async (req, res) => {
         { model: Domain, attributes: ['name'] },
         { model: User, attributes: ['username'] } 
       ],
-      distinct: true, // 🔥 ไฮไลต์เด็ด: แก้ไขปัญหา 500 Error ของ SQLite เวลาผูกความสัมพันธ์ตารางร่วมกับ limit/offset
+      distinct: true, 
       limit,
       offset,
       order: [['createdAt', 'DESC']] 
@@ -54,7 +54,7 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-// 🚀 2. POST: สร้างลิงก์ย่อใหม่ (รองรับ URL พารามิเตอร์ยาวๆ ทุกรูปแบบ)
+// 🚀 2. POST: สร้างลิงก์ย่อใหม่ (อัปเดตแก้ปัญหา Link.createdBy cannot be null)
 router.post('/', auth, async (req, res) => {
   try {
     let { originalUrl, alias, tags } = req.body;
@@ -63,19 +63,16 @@ router.post('/', auth, async (req, res) => {
       return res.status(400).json({ message: 'กรุณากรอก URL ปลายทาง' });
     }
 
-    // เติมโปรโตคอลให้อัตโนมัติถ้าผู้ใช้ลืมพิมพ์
     if (!originalUrl.startsWith('http://') && !originalUrl.startsWith('https://')) {
       originalUrl = 'https://' + originalUrl;
     }
 
-    // 🔥 เปลี่ยนมาใช้ระบบตรวจสอบโครงสร้างสากล ป้องกันอาการดีดลิงก์ยาวที่มีพารามิเตอร์พัง
     try {
       new URL(originalUrl);
     } catch (e) {
       return res.status(400).json({ message: 'รูปแบบ URL ไม่ถูกต้อง' });
     }
 
-    // แกะเอาชื่อโดเมนหลักของลิงก์ปลายทางมาบันทึกเข้าระบบโดเมนโดยอัตโนมัติ
     const urlObj = new URL(originalUrl);
     const domainName = urlObj.hostname; 
 
@@ -84,13 +81,11 @@ router.post('/', auth, async (req, res) => {
       domain = await Domain.create({ name: domainName, createdBy: req.user.id });
     }
 
-    // ตรวจสอบชื่อย่อ (Alias)
     if (alias) {
       alias = alias.trim().toLowerCase();
       const existing = await Link.findOne({ where: { alias } });
       if (existing) return res.status(400).json({ message: 'ชื่อย่อ (Alias) นี้ถูกใช้งานไปแล้ว' });
     } else {
-      // ระบบสุ่มชื่อย่ออัตโนมัติ 4 ตัวหากเว้นว่างไว้
       const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
       let isUnique = false;
       while (!isUnique) {
@@ -103,23 +98,22 @@ router.post('/', auth, async (req, res) => {
       }
     }
 
-    // จัดการแท็กคัดกรองข้อมูล
     let processedTags = [];
     if (tags) {
       processedTags = tags.split(',').map(t => t.trim().toLowerCase()).filter(t => t !== '');
     }
 
-    // บันทึกลงฐานข้อมูลจริง
+    // 🔥 บันทึกลงฐานข้อมูลจริง (เติมข้อมูลให้ครบถ้วนเพื่อไม่ให้เกิดการขัดแย้งของเงื่อนไขฐานข้อมูล)
     const newLink = await Link.create({
       originalUrl,
       alias,
       tags: processedTags,
-      userId: req.user.id,
+      userId: req.user.id,      // ผูกความสัมพันธ์ระบบ Model Interceptor
+      createdBy: req.user.id,   // 🔥 เพิ่มบรรทัดนี้เข้ามาเพื่อแก้ปัญหา 'Link.createdBy cannot be null' แบบถาวร
       domainId: domain.id,
       clicks: 0
     });
 
-    // ดึงความสัมพันธ์กลับไปส่งให้หน้าบ้านโชว์ผลทันทีแบบไม่ต้องรีเฟรชหน้าเว็บ
     const activeLink = await Link.findByPk(newLink.id, {
       include: [
         { model: Domain, attributes: ['name'] },
