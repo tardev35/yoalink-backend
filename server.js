@@ -54,6 +54,7 @@ app.get('/:alias', async (req, res) => {
 });
 
 const PORT = 5000;
+// บรรทัดที่ 57 ปรับแก้ให้มี .then(() แบบนี้ครับ
 sequelize.sync().then(() => {
   console.log('📦 Database Tables Synced Successfully!');
   app.listen(PORT, () => {
