@@ -10,3 +10,4 @@ database.sqlite
 # OS generated files (ไฟล์ขยะของระบบปฏิบัติการ)
 .DS_Store
 Thumbs.db
+dist/
