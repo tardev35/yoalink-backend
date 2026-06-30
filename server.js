@@ -8,6 +8,14 @@ const User = require('./models/User');
 const Link = require('./models/Link');
 const Domain = require('./models/Domain');
 
+// 👑 ประกาศความสัมพันธ์ระหว่างตาราง (Associations) - แก้ปัญหา EagerLoadingError
+Link.belongsTo(User, { foreignKey: 'userId' });
+User.hasMany(Link, { foreignKey: 'userId' });
+
+// ผูกตารางลิงก์กับโดเมนหลักให้สมบูรณ์
+Link.belongsTo(Domain, { foreignKey: 'domainId' });
+Domain.hasMany(Link, { foreignKey: 'domainId' });
+
 const app = express();
 
 app.use(cors());
@@ -19,7 +27,7 @@ app.use('/api/links', require('./routes/links'));
 app.use('/api/domains', require('./routes/domains'));
 app.use('/api/admin', require('./routes/admin')); // เส้นทางแอดมินยกล็อต
 
-// 🚀 ระบบ Redirect ลิงก์ย่อ (ดักจับคนคลิกลิงก์) - ต้องอยู่ล่างสุดก่อนพอร์ตฟังระบบ
+// 🚀 ระบบ Redirect ลิงก์ย่อ (ดักจับคนคลิกลิงก์)
 app.get('/:alias', async (req, res) => {
   try {
     const { alias } = req.params;
