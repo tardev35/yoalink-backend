@@ -149,6 +149,38 @@ router.delete('/:id', auth, async (req, res) => {
   }
 });
 
+// ✏️ 3.5 PUT: อัปเดต/แก้ไข แท็กของลิงก์ย่อแต่ละรายการ
+router.put('/:id/tags', auth, async (req, res) => {
+  try {
+    const { tags } = req.body;
+    let whereClause = { id: req.params.id };
+    
+    if (req.user.role !== 'admin') {
+      whereClause.userId = req.user.id;
+    }
+
+    const link = await Link.findOne({ where: whereClause });
+    if (!link) {
+      return res.status(404).json({ message: 'ไม่พบลิงก์หรือคุณไม่มีสิทธิ์แก้ไข' });
+    }
+
+    // ประมวลผลแท็กใหม่ (กรองค่าว่างและคั่นด้วยคอมมา)
+    let processedTags = [];
+    if (tags) {
+      processedTags = tags.split(',').map(t => t.trim().toLowerCase()).filter(t => t !== '');
+    }
+
+    link.tags = processedTags;
+    link.changed('tags', true); // บังคับให้ Sequelize รู้ว่า JSON ถูกแก้ไข
+    await link.save();
+
+    res.json({ message: 'อัปเดตแท็กสำเร็จ', tags: link.tags });
+  } catch (error) {
+    console.error('Update Tags Error:', error);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดในการแก้ไขแท็ก' });
+  }
+});
+
 const LinkChannelStat = require('../models/LinkChannelStat');
 
 // 📊 4. GET: ดึงสถิติคัดแยกช่องทางมาร์เก็ตติ้ง (Module 1)
