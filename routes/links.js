@@ -249,4 +249,27 @@ router.get('/:id/device-stats', auth, async (req, res) => {
   }
 });
 
+// 🏆 7. GET: โมดูล 4 - จัดอันดับ Top Rank Leaderboard
+router.get('/rank/top', auth, async (req, res) => {
+  try {
+    let whereClause = {};
+    if (req.user.role !== 'admin') {
+      whereClause.userId = req.user.id; // Member เห็นเฉพาะของตัวเอง
+    }
+    const topLinks = await Link.findAll({
+      where: whereClause,
+      include: [
+        { model: Domain, attributes: ['name'] },
+        { model: User, attributes: ['username'] }
+      ],
+      order: [['clicks', 'DESC']],
+      limit: 20
+    });
+    res.json(topLinks);
+  } catch (error) {
+    console.error('Fetch Top Rank Error:', error);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดในการดึงข้อมูลจัดอันดับ' });
+  }
+});
+
 module.exports = router;
