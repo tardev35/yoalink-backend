@@ -13,7 +13,8 @@ const Domain = require('./models/Domain');
 const LinkChannelStat = require('./models/LinkChannelStat'); 
 const LinkClickLog = require('./models/LinkClickLog'); 
 const LinkClickDevice = require('./models/LinkClickDevice'); 
-const LinkReferrerStat = require('./models/LinkReferrerStat'); 
+const LinkReferrerStat = require('./models/LinkReferrerStat')
+const AuditLog = require('./models/AuditLog'); 
 
 // 🤝 ประกาศผูกความสัมพันธ์ระหว่างตาราง (Associations)
 Link.belongsTo(User, { foreignKey: 'userId' });

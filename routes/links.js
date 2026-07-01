@@ -4,6 +4,7 @@ const { Op } = require('sequelize');
 const Link = require('../models/Link');
 const Domain = require('../models/Domain');
 const User = require('../models/User'); 
+const AuditLog = require('../models/AuditLog'); // 🔥 นำเข้าระบบบันทึกประวัติ
 const auth = require('../middleware/auth');
 const router = express.Router();
 
@@ -48,7 +49,7 @@ router.get('/', auth, async (req, res) => {
       links: rows,
       totalPages: Math.ceil(count / limit),
       currentPage: page,
-      totalLinks: count // 🔥 ส่งจำนวนลิงก์รวมทั้งหมด (พนักงานเห็นเฉพาะของตนเอง / แอดมินเห็นรวมทั้งระบบ)
+      totalLinks: count // 🔥 ส่งจำนวนลิงก์รวมทั้งหมด
     });
   } catch (error) {
     console.error('Fetch Links Backend Error:', error);
@@ -56,7 +57,7 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-// 🚀 2. POST: สร้างลิงก์ย่อใหม่
+// 🚀 2. POST: สร้างลิงก์ย่อใหม่ + 🛡️ Audit Log
 router.post('/', auth, async (req, res) => {
   try {
     let { originalUrl, alias, tags } = req.body;
@@ -126,6 +127,16 @@ router.post('/', auth, async (req, res) => {
       ]
     });
 
+    // 🕵️‍♂️ แอบบันทึกประวัติการสร้างลิงก์ (Audit Log)
+    await AuditLog.create({
+      userId: req.user.id,
+      action: 'CREATE_LINK',
+      details: { 
+        alias: activeLink.alias, 
+        targetUrl: activeLink.originalUrl 
+      }
+    });
+
     res.status(201).json(activeLink);
   } catch (error) {
     console.error('Create Link Error:', error);
@@ -133,24 +144,38 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
-// 🗑️ 3. DELETE: ลบข้อมูลลิงก์ย่อ
+// 🗑️ 3. DELETE: ลบข้อมูลลิงก์ย่อ + 🛡️ Audit Log
 router.delete('/:id', auth, async (req, res) => {
   try {
     let whereClause = { id: req.params.id };
     if (req.user.role !== 'admin') {
       whereClause.userId = req.user.id;
     }
-    const deleted = await Link.destroy({ where: whereClause });
-    if (!deleted) {
+
+    // หาข้อมูลลิงก์ก่อนลบ เพื่อเอามาบันทึกประวัติ
+    const linkToDel = await Link.findOne({ where: whereClause });
+    if (!linkToDel) {
       return res.status(404).json({ message: 'ไม่พบลิงก์ที่ต้องการลบหรือคุณไม่มีสิทธิ์' });
     }
+
+    // 🕵️‍♂️ แอบบันทึกประวัติการลบลิงก์ (Audit Log)
+    await AuditLog.create({
+      userId: req.user.id,
+      action: 'DELETE_LINK',
+      details: { 
+        alias: linkToDel.alias, 
+        targetUrl: linkToDel.originalUrl 
+      }
+    });
+
+    await linkToDel.destroy();
     res.json({ message: 'ลบลิงก์สำเร็จ' });
   } catch (error) {
     res.status(500).json({ message: 'Error deleting link' });
   }
 });
 
-// ✏️ 3.5 PUT: อัปเดต/แก้ไข แท็กของลิงก์ย่อแต่ละรายการ
+// ✏️ 3.5 PUT: อัปเดต/แก้ไข แท็กของลิงก์ย่อแต่ละรายการ + 🛡️ Audit Log
 router.put('/:id/tags', auth, async (req, res) => {
   try {
     const { tags } = req.body;
@@ -173,6 +198,16 @@ router.put('/:id/tags', auth, async (req, res) => {
     link.tags = processedTags;
     link.changed('tags', true); 
     await link.save();
+
+    // 🕵️‍♂️ แอบบันทึกประวัติการแก้แท็ก (Audit Log)
+    await AuditLog.create({
+      userId: req.user.id,
+      action: 'UPDATE_TAGS',
+      details: { 
+        alias: link.alias, 
+        newTags: processedTags 
+      }
+    });
 
     res.json({ message: 'อัปเดตแท็กสำเร็จ', tags: link.tags });
   } catch (error) {
@@ -255,8 +290,13 @@ router.get('/:id/time-stats', auth, async (req, res) => {
       }
     });
 
-    const hourlyData = Object.keys(hourlyGrid).map(h => ({ hour: `${h}:00`, clicks: hourlyGrid[h] }));
-    const dailyData = Object.keys(dailyGrid).map(d => ({ date: d, clicks: dailyGrid[d] }));
+    const hourlyData = Object.keys(hourlyGrid).map(h => {
+      return { hour: `${h}:00`, clicks: hourlyGrid[h] };
+    });
+    
+    const dailyData = Object.keys(dailyGrid).map(d => {
+      return { date: d, clicks: dailyGrid[d] };
+    });
 
     res.json({ hourly: hourlyData, daily: dailyData });
   } catch (error) {
@@ -325,7 +365,7 @@ router.get('/rank/top', auth, async (req, res) => {
 
 const LinkReferrerStat = require('../models/LinkReferrerStat');
 
-// 🌐 8. 🔥 โมดูล 5 GET: ดึงสถิติโดเมนต้นทาง (Top Referrers) เรียงลำดับจากมากไปน้อย
+// 🌐 8. 🔥 โมดูล 5 GET: ดึงสถิติโดเมนต้นทาง (Top Referrers)
 router.get('/:id/referrer-stats', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
@@ -341,11 +381,17 @@ router.get('/:id/referrer-stats', auth, async (req, res) => {
     });
 
     let totalReferrerClicks = 0;
-    referrerRows.forEach(r => totalReferrerClicks += r.clicks);
+    referrerRows.forEach(r => {
+      totalReferrerClicks += r.clicks;
+    });
 
     const statsData = referrerRows.map(r => {
       const percentage = totalReferrerClicks > 0 ? ((r.clicks / totalReferrerClicks) * 100).toFixed(2) : 0; 
-      return { domain: r.referrerDomain, clicks: r.clicks, percentage: parseFloat(percentage) };
+      return { 
+        domain: r.referrerDomain, 
+        clicks: r.clicks, 
+        percentage: parseFloat(percentage) 
+      };
     });
 
     res.json({ totalReferrerClicks, stats: statsData });
