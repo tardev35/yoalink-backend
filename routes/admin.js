@@ -53,6 +53,57 @@ router.get('/domains', [auth, isAdmin], async (req, res) => {
   } catch (error) { res.status(500).json({ message: 'Error fetching domains' }); }
 });
 
+router.post('/domains', [auth, isAdmin], async (req, res) => {
+  try {
+    const { name } = req.body;
+    const exist = await Domain.findOne({ where: { name } });
+    if (exist) return res.status(400).json({ message: 'โดเมนนี้มีอยู่ในระบบแล้ว' });
+    
+    const newDomain = await Domain.create({ name, createdBy: req.user.id });
+    res.status(201).json(newDomain);
+  } catch (error) { res.status(500).json({ message: 'Error creating domain' }); }
+});
+
+// 🔥 อัปเกรด: แก้ไขโดเมนปุ๊บ วิ่งไปแก้ URL ปลายทางจริงให้ทุกลิงก์อัตโนมัติ!
+router.put('/domains/:id', [auth, isAdmin], async (req, res) => {
+  try {
+    const domain = await Domain.findByPk(req.params.id);
+    if (!domain) return res.status(404).json({ message: 'ไม่พบโดเมน' });
+
+    const oldDomainName = domain.name; // เก็บชื่อโดเมนเก่าไว้ก่อน
+    const newDomainName = req.body.name.trim();
+
+    // ทำงานเมื่อมีการเปลี่ยนชื่อโดเมนจริงๆ เท่านั้น
+    if (oldDomainName !== newDomainName) {
+      domain.name = newDomainName;
+      await domain.save(); 
+
+      // 🚀 วิ่งไปกวาดลิงก์ย่อทั้งหมดที่ผูกอยู่กับโดเมนนี้
+      const links = await Link.findAll({ where: { domainId: domain.id } });
+      
+      for (let link of links) {
+        // ใช้คำสั่ง Replace แทนที่โดเมนเก่า -> เป็นโดเมนใหม่ ใน URL ปลายทาง
+        if (link.originalUrl && link.originalUrl.includes(oldDomainName)) {
+          link.originalUrl = link.originalUrl.replace(oldDomainName, newDomainName);
+          await link.save();
+        }
+      }
+    }
+
+    res.json({ message: 'อัปเดตโดเมนและลิงก์ปลายทางที่เกี่ยวข้องสำเร็จ!' });
+  } catch (error) { 
+    console.error('Update Domain Error:', error);
+    res.status(500).json({ message: 'Error updating domain' }); 
+  }
+});
+
+router.delete('/domains/:id', [auth, isAdmin], async (req, res) => {
+  try {
+    await Domain.destroy({ where: { id: req.params.id } });
+    res.json({ message: 'ลบโดเมนสำเร็จ' });
+  } catch (error) { res.status(500).json({ message: 'Error deleting domain' }); }
+});
+
 // ➕ เทสและรีวิวเพิ่มฟังก์ชัน: รองรับการสร้างโดเมนใหม่ตรงจากปุ่มเขียวหน้าบ้าน
 router.post('/domains', [auth, isAdmin], async (req, res) => {
   try {
