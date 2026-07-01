@@ -1,10 +1,17 @@
 const { Sequelize } = require('sequelize');
 
-// ตั้งค่าเชื่อมต่อฐานข้อมูล SQLite (เมื่อขึ้นระบบจริง เปลี่ยนแค่ตรงนี้เป็น MySQL บรรทัดเดียวจบ)
 const sequelize = new Sequelize({
   dialect: 'sqlite',
-  storage: './database.sqlite', 
-  logging: false 
+  storage: './database.sqlite',
+  logging: false,
+  // 🔥 เปิดโหมด WAL เพื่อให้ SQLite อ่าน/เขียนข้อมูลพร้อมกันได้ลื่นไหล ไม่ค้าง!
+  dialectOptions: {
+    pragmas: {
+      journal_mode: 'WAL',
+      synchronous: 'NORMAL',
+      cache_size: -64000
+    }
+  }
 });
 
 module.exports = sequelize;
