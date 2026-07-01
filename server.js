@@ -13,7 +13,7 @@ const Domain = require('./models/Domain');
 const LinkChannelStat = require('./models/LinkChannelStat'); 
 const LinkClickLog = require('./models/LinkClickLog'); 
 const LinkClickDevice = require('./models/LinkClickDevice'); 
-const LinkReferrerStat = require('./models/LinkReferrerStat'); // 🔥 โมดูล 5: นำเข้าตารางแหล่งที่มา
+const LinkReferrerStat = require('./models/LinkReferrerStat'); 
 
 // 🤝 ประกาศผูกความสัมพันธ์ระหว่างตาราง (Associations)
 Link.belongsTo(User, { foreignKey: 'userId' });
@@ -30,7 +30,6 @@ LinkClickLog.belongsTo(Link, { foreignKey: 'linkId' });
 Link.hasMany(LinkClickDevice, { foreignKey: 'linkId', onDelete: 'CASCADE' });
 LinkClickDevice.belongsTo(Link, { foreignKey: 'linkId' });
 
-// 🔥 โมดูล 5: ผูกความสัมพันธ์ตารางสถิติแหล่งที่มา (Referrer)
 Link.hasMany(LinkReferrerStat, { foreignKey: 'linkId', onDelete: 'CASCADE' });
 LinkReferrerStat.belongsTo(Link, { foreignKey: 'linkId' });
 
@@ -69,14 +68,18 @@ app.get('/:alias', async (req, res) => {
     link.clicks += 1;
     await link.save();
 
-    // 2. โมดูล 1: คัดแยกพารามิเตอร์ช่องทาง
+    // 2. 🔥 โมดูล 1: คัดแยกพารามิเตอร์ช่องทาง (อัปเกรดระบบ Key => Value)
+    // รองรับทั้งแบบใหม่ (?s=1) และเผื่อแบบเก่า (?src=fb) ที่อาจจะมีคนเอาไปแปะแล้ว
+    let rawS = (req.query.s || '').toString().trim();
     let rawSrc = (req.query.src || '').toLowerCase().trim();
     let targetChannel = 'organic/direct'; 
-    if (rawSrc === 'facebook' || rawSrc === 'fb') targetChannel = 'facebook';
-    else if (rawSrc === 'tiktok' || rawSrc === 'tt') targetChannel = 'tiktok';
-    else if (rawSrc === 'line') targetChannel = 'line';
-    else if (rawSrc === 'sms') targetChannel = 'sms';
-    else if (rawSrc === 'seo') targetChannel = 'seo';
+    let forwardParam = '';
+
+    if (rawS === '1' || rawSrc === 'facebook' || rawSrc === 'fb') { targetChannel = 'facebook'; forwardParam = '1'; }
+    else if (rawS === '2' || rawSrc === 'tiktok' || rawSrc === 'tt') { targetChannel = 'tiktok'; forwardParam = '2'; }
+    else if (rawS === '3' || rawSrc === 'line') { targetChannel = 'line'; forwardParam = '3'; }
+    else if (rawS === '4' || rawSrc === 'sms') { targetChannel = 'sms'; forwardParam = '4'; }
+    else if (rawS === '5' || rawSrc === 'seo') { targetChannel = 'seo'; forwardParam = '5'; }
 
     const [statRecord, created] = await LinkChannelStat.findOrCreate({
       where: { linkId: link.id, channel: targetChannel },
@@ -100,16 +103,16 @@ app.get('/:alias', async (req, res) => {
     });
     if (!devCreated) { devRecord.clicks += 1; await devRecord.save(); }
 
-    // 5. 🔥 โมดูล 5: ดักจับและแกะรอยโดเมนต้นทาง (HTTP Referer)
+    // 5. โมดูล 5: ดักจับและแกะรอยโดเมนต้นทาง (HTTP Referer)
     const refererHeader = req.get('Referer') || req.get('Referrer') || '';
-    let detectedReferrer = 'Direct, Email, SMS'; // ค่าเริ่มต้นถ้าคนพิมพ์เข้าตรงๆ หรือมาจากแอปแชท
+    let detectedReferrer = 'Direct, Email, SMS'; 
 
     if (refererHeader) {
       try {
         const refUrl = new URL(refererHeader);
-        detectedReferrer = refUrl.hostname.replace(/^www\./, ''); // ตัด www. ออกให้ดูสะอาดตา
+        detectedReferrer = refUrl.hostname.replace(/^www\./, ''); 
       } catch (err) {
-        detectedReferrer = 'Unknown Domain'; // กรณีที่พาร์ส URL ไม่สำเร็จ
+        detectedReferrer = 'Unknown Domain'; 
       }
     }
 
@@ -122,11 +125,11 @@ app.get('/:alias', async (req, res) => {
       await refStatRecord.save();
     }
 
-    // 6. ประกอบ URL แล้วเตะส่งต่อ
+    // 6. 🚀 ประกอบ URL ส่งต่อไปเว็บหลัก (แนบแบบสั้น ?s=X ไปด้วย)
     let finalUrl = link.originalUrl + (link.parameter || '');
     if (targetChannel !== 'organic/direct') {
       const joinChar = finalUrl.includes('?') ? '&' : '?';
-      finalUrl = `${finalUrl}${joinChar}src=${targetChannel}`;
+      finalUrl = `${finalUrl}${joinChar}s=${forwardParam}`;
     }
 
     res.redirect(finalUrl);
