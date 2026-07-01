@@ -7,7 +7,7 @@ const User = require('../models/User');
 const auth = require('../middleware/auth');
 const router = express.Router();
 
-// 📋 1. GET: ดึงรายการลิงก์ย่อทั้งหมด
+// 📋 1. GET: ดึงรายการลิงก์ย่อทั้งหมด (อัปเกรดส่งตัวนับจำนวนลิงก์ทั้งหมด)
 router.get('/', auth, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -47,7 +47,8 @@ router.get('/', auth, async (req, res) => {
     res.json({
       links: rows,
       totalPages: Math.ceil(count / limit),
-      currentPage: page
+      currentPage: page,
+      totalLinks: count // 🔥 ส่งจำนวนลิงก์รวมทั้งหมด (พนักงานเห็นเฉพาะของตนเอง / แอดมินเห็นรวมทั้งระบบ)
     });
   } catch (error) {
     console.error('Fetch Links Backend Error:', error);
@@ -164,14 +165,13 @@ router.put('/:id/tags', auth, async (req, res) => {
       return res.status(404).json({ message: 'ไม่พบลิงก์หรือคุณไม่มีสิทธิ์แก้ไข' });
     }
 
-    // ประมวลผลแท็กใหม่ (กรองค่าว่างและคั่นด้วยคอมมา)
     let processedTags = [];
     if (tags) {
       processedTags = tags.split(',').map(t => t.trim().toLowerCase()).filter(t => t !== '');
     }
 
     link.tags = processedTags;
-    link.changed('tags', true); // บังคับให้ Sequelize รู้ว่า JSON ถูกแก้ไข
+    link.changed('tags', true); 
     await link.save();
 
     res.json({ message: 'อัปเดตแท็กสำเร็จ', tags: link.tags });
