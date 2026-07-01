@@ -85,7 +85,9 @@ router.post('/', auth, async (req, res) => {
     if (alias) {
       alias = alias.trim().toLowerCase();
       const existing = await Link.findOne({ where: { alias } });
-      if (existing) return res.status(400).json({ message: 'ชื่อย่อ (Alias) นี้ถูกใช้งานไปแล้ว' });
+      if (existing) {
+        return res.status(400).json({ message: 'ชื่อย่อ (Alias) นี้ถูกใช้งานไปแล้ว' });
+      }
     } else {
       const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
       let isUnique = false;
@@ -95,7 +97,9 @@ router.post('/', auth, async (req, res) => {
           alias += chars.charAt(Math.floor(Math.random() * chars.length));
         }
         const existing = await Link.findOne({ where: { alias } });
-        if (!existing) isUnique = true;
+        if (!existing) {
+          isUnique = true;
+        }
       }
     }
 
@@ -136,7 +140,9 @@ router.delete('/:id', auth, async (req, res) => {
       whereClause.userId = req.user.id;
     }
     const deleted = await Link.destroy({ where: whereClause });
-    if (!deleted) return res.status(404).json({ message: 'ไม่พบลิงก์ที่ต้องการลบหรือคุณไม่มีสิทธิ์' });
+    if (!deleted) {
+      return res.status(404).json({ message: 'ไม่พบลิงก์ที่ต้องการลบหรือคุณไม่มีสิทธิ์' });
+    }
     res.json({ message: 'ลบลิงก์สำเร็จ' });
   } catch (error) {
     res.status(500).json({ message: 'Error deleting link' });
@@ -150,7 +156,9 @@ router.get('/:id/channel-stats', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
       const link = await Link.findOne({ where: { id: req.params.id, userId: req.user.id } });
-      if (!link) return res.status(403).json({ message: 'คุณไม่มีสิทธิ์เข้าถึงข้อมูลลิงก์ชิ้นนี้' });
+      if (!link) {
+        return res.status(403).json({ message: 'คุณไม่มีสิทธิ์เข้าถึงข้อมูลลิงก์ชิ้นนี้' });
+      }
     }
 
     const channelRows = await LinkChannelStat.findAll({ where: { linkId: req.params.id } });
@@ -183,16 +191,21 @@ router.get('/:id/time-stats', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
       const link = await Link.findOne({ where: { id: req.params.id, userId: req.user.id } });
-      if (!link) return res.status(403).json({ message: 'คุณไม่มีสิทธิ์เข้าถึงข้อมูลลิงก์ชิ้นนี้' });
+      if (!link) {
+        return res.status(403).json({ message: 'คุณไม่มีสิทธิ์เข้าถึงข้อมูลลิงก์ชิ้นนี้' });
+      }
     }
 
     const clickLogs = await LinkClickLog.findAll({ where: { linkId: req.params.id }, attributes: ['createdAt'], raw: true });
     const hourlyGrid = {};
-    for (let i = 0; i < 24; i++) { hourlyGrid[String(i).padStart(2, '0')] = 0; }
+    for (let i = 0; i < 24; i++) { 
+      hourlyGrid[String(i).padStart(2, '0')] = 0; 
+    }
 
     const dailyGrid = {};
     for (let i = 6; i >= 0; i--) {
-      const d = new Date(); d.setDate(d.getDate() - i);
+      const d = new Date(); 
+      d.setDate(d.getDate() - i);
       const dateStr = d.toLocaleDateString('th-TH', { day: '2-digit', month: 'short' });
       dailyGrid[dateStr] = 0;
     }
@@ -200,10 +213,14 @@ router.get('/:id/time-stats', auth, async (req, res) => {
     clickLogs.forEach(log => {
       const dateObj = new Date(log.createdAt);
       const hourStr = String(dateObj.getHours()).padStart(2, '0');
-      if (hourlyGrid[hourStr] !== undefined) hourlyGrid[hourStr] += 1;
+      if (hourlyGrid[hourStr] !== undefined) {
+        hourlyGrid[hourStr] += 1;
+      }
 
       const dateStr = dateObj.toLocaleDateString('th-TH', { day: '2-digit', month: 'short' });
-      if (dailyGrid[dateStr] !== undefined) dailyGrid[dateStr] += 1;
+      if (dailyGrid[dateStr] !== undefined) {
+        dailyGrid[dateStr] += 1;
+      }
     });
 
     const hourlyData = Object.keys(hourlyGrid).map(h => ({ hour: `${h}:00`, clicks: hourlyGrid[h] }));
@@ -217,12 +234,14 @@ router.get('/:id/time-stats', auth, async (req, res) => {
 
 const LinkClickDevice = require('../models/LinkClickDevice');
 
-// 📱 6. 🔥 โมดูล 3 GET: คำนวณเปอร์เซ็นต์อุปกรณ์ส่งให้หน้าบ้านเรนเดอร์กราฟ (New Endpoint!)
+// 📱 6. GET: คำนวณเปอร์เซ็นต์อุปกรณ์ส่งให้หน้าบ้านเรนเดอร์กราฟ (Module 3)
 router.get('/:id/device-stats', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
       const link = await Link.findOne({ where: { id: req.params.id, userId: req.user.id } });
-      if (!link) return res.status(403).json({ message: 'คุณไม่มีสิทธิ์เข้าถึงข้อมูลลิงก์ชิ้นนี้' });
+      if (!link) {
+        return res.status(403).json({ message: 'คุณไม่มีสิทธิ์เข้าถึงข้อมูลลิงก์ชิ้นนี้' });
+      }
     }
 
     const deviceRows = await LinkClickDevice.findAll({ where: { linkId: req.params.id } });
@@ -254,7 +273,7 @@ router.get('/rank/top', auth, async (req, res) => {
   try {
     let whereClause = {};
     if (req.user.role !== 'admin') {
-      whereClause.userId = req.user.id; // Member เห็นเฉพาะของตัวเอง
+      whereClause.userId = req.user.id; 
     }
     const topLinks = await Link.findAll({
       where: whereClause,
@@ -269,6 +288,38 @@ router.get('/rank/top', auth, async (req, res) => {
   } catch (error) {
     console.error('Fetch Top Rank Error:', error);
     res.status(500).json({ message: 'เกิดข้อผิดพลาดในการดึงข้อมูลจัดอันดับ' });
+  }
+});
+
+const LinkReferrerStat = require('../models/LinkReferrerStat');
+
+// 🌐 8. 🔥 โมดูล 5 GET: ดึงสถิติโดเมนต้นทาง (Top Referrers) เรียงลำดับจากมากไปน้อย
+router.get('/:id/referrer-stats', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      const link = await Link.findOne({ where: { id: req.params.id, userId: req.user.id } });
+      if (!link) {
+        return res.status(403).json({ message: 'คุณไม่มีสิทธิ์เข้าถึงข้อมูลลิงก์ชิ้นนี้' });
+      }
+    }
+
+    const referrerRows = await LinkReferrerStat.findAll({
+      where: { linkId: req.params.id },
+      order: [['clicks', 'DESC']] 
+    });
+
+    let totalReferrerClicks = 0;
+    referrerRows.forEach(r => totalReferrerClicks += r.clicks);
+
+    const statsData = referrerRows.map(r => {
+      const percentage = totalReferrerClicks > 0 ? ((r.clicks / totalReferrerClicks) * 100).toFixed(2) : 0; 
+      return { domain: r.referrerDomain, clicks: r.clicks, percentage: parseFloat(percentage) };
+    });
+
+    res.json({ totalReferrerClicks, stats: statsData });
+  } catch (error) {
+    console.error('Fetch Referrer Stats Error:', error);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดในการดึงข้อมูลต้นทาง Referrer' });
   }
 });
 

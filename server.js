@@ -12,7 +12,8 @@ const Link = require('./models/Link');
 const Domain = require('./models/Domain');
 const LinkChannelStat = require('./models/LinkChannelStat'); 
 const LinkClickLog = require('./models/LinkClickLog'); 
-const LinkClickDevice = require('./models/LinkClickDevice'); // 🔥 โมดูล 3: นำเข้าตารางอุปกรณ์ตัวใหม่
+const LinkClickDevice = require('./models/LinkClickDevice'); 
+const LinkReferrerStat = require('./models/LinkReferrerStat'); // 🔥 โมดูล 5: นำเข้าตารางแหล่งที่มา
 
 // 🤝 ประกาศผูกความสัมพันธ์ระหว่างตาราง (Associations)
 Link.belongsTo(User, { foreignKey: 'userId' });
@@ -26,9 +27,12 @@ LinkChannelStat.belongsTo(Link, { foreignKey: 'linkId' });
 Link.hasMany(LinkClickLog, { foreignKey: 'linkId', onDelete: 'CASCADE' });
 LinkClickLog.belongsTo(Link, { foreignKey: 'linkId' });
 
-// 🔥 โมดูล 3: ผูกความสัมพันธ์ตารางสถิติอุปกรณ์
 Link.hasMany(LinkClickDevice, { foreignKey: 'linkId', onDelete: 'CASCADE' });
 LinkClickDevice.belongsTo(Link, { foreignKey: 'linkId' });
+
+// 🔥 โมดูล 5: ผูกความสัมพันธ์ตารางสถิติแหล่งที่มา (Referrer)
+Link.hasMany(LinkReferrerStat, { foreignKey: 'linkId', onDelete: 'CASCADE' });
+LinkReferrerStat.belongsTo(Link, { foreignKey: 'linkId' });
 
 const app = express();
 app.use(helmet()); 
@@ -51,7 +55,7 @@ app.use('/api/links', require('./routes/links'));
 app.use('/api/domains', require('./routes/domains'));
 app.use('/api/admin', require('./routes/admin'));
 
-// 🚀 ระบบ Redirect ลิงก์ย่อ + ดักจับพารามิเตอร์ช่องทาง + บันทึกเวลา + วิเคราะห์คัดแยกอุปกรณ์ (Module 3)
+// 🚀 ระบบ Redirect ลิงก์ย่อ พร้อมรวบรวมข้อมูล 5 โมดูล
 app.get('/:alias', async (req, res) => {
   try {
     const { alias } = req.params;
@@ -65,10 +69,9 @@ app.get('/:alias', async (req, res) => {
     link.clicks += 1;
     await link.save();
 
-    // 2. แกะรอยค่ายการตลาด (Module 1)
+    // 2. โมดูล 1: คัดแยกพารามิเตอร์ช่องทาง
     let rawSrc = (req.query.src || '').toLowerCase().trim();
     let targetChannel = 'organic/direct'; 
-
     if (rawSrc === 'facebook' || rawSrc === 'fb') targetChannel = 'facebook';
     else if (rawSrc === 'tiktok' || rawSrc === 'tt') targetChannel = 'tiktok';
     else if (rawSrc === 'line') targetChannel = 'line';
@@ -79,39 +82,47 @@ app.get('/:alias', async (req, res) => {
       where: { linkId: link.id, channel: targetChannel },
       defaults: { clicks: 1 }
     });
-    if (!created) {
-      statRecord.clicks += 1;
-      await statRecord.save();
-    }
+    if (!created) { statRecord.clicks += 1; await statRecord.save(); }
 
-    // 3. บันทึกประวัติเวลาคลิก (Module 2)
-    await LinkClickLog.create({
-      linkId: link.id,
-      channel: targetChannel
-    });
+    // 3. โมดูล 2: บันทึกเวลาคลิก
+    await LinkClickLog.create({ linkId: link.id, channel: targetChannel });
 
-    // 4. 🔥 โมดูล 3: ดักจับและคัดแยกกลุ่มระบบปฏิบัติการ (User-Agent Sniffer)
+    // 4. โมดูล 3: วิเคราะห์อุปกรณ์ผู้ใช้
     const ua = req.get('user-agent') || '';
     let detectedPlatform = 'Other';
-
-    if (/iphone|ipad|ipod/i.test(ua)) {
-      detectedPlatform = 'iOS';
-    } else if (/android/i.test(ua)) {
-      detectedPlatform = 'Android';
-    } else if (/windows|macintosh|linux/i.test(ua)) {
-      detectedPlatform = 'Desktop';
-    }
+    if (/iphone|ipad|ipod/i.test(ua)) detectedPlatform = 'iOS';
+    else if (/android/i.test(ua)) detectedPlatform = 'Android';
+    else if (/windows|macintosh|linux/i.test(ua)) detectedPlatform = 'Desktop';
 
     const [devRecord, devCreated] = await LinkClickDevice.findOrCreate({
       where: { linkId: link.id, platform: detectedPlatform },
       defaults: { clicks: 1 }
     });
-    if (!devCreated) {
-      devRecord.clicks += 1;
-      await devRecord.save();
+    if (!devCreated) { devRecord.clicks += 1; await devRecord.save(); }
+
+    // 5. 🔥 โมดูล 5: ดักจับและแกะรอยโดเมนต้นทาง (HTTP Referer)
+    const refererHeader = req.get('Referer') || req.get('Referrer') || '';
+    let detectedReferrer = 'Direct, Email, SMS'; // ค่าเริ่มต้นถ้าคนพิมพ์เข้าตรงๆ หรือมาจากแอปแชท
+
+    if (refererHeader) {
+      try {
+        const refUrl = new URL(refererHeader);
+        detectedReferrer = refUrl.hostname.replace(/^www\./, ''); // ตัด www. ออกให้ดูสะอาดตา
+      } catch (err) {
+        detectedReferrer = 'Unknown Domain'; // กรณีที่พาร์ส URL ไม่สำเร็จ
+      }
     }
 
-    // 5. ประกอบ URL พ่วงพารามิเตอร์ยิงส่งต่อไปให้เว็บหลัก
+    const [refStatRecord, refCreated] = await LinkReferrerStat.findOrCreate({
+      where: { linkId: link.id, referrerDomain: detectedReferrer },
+      defaults: { clicks: 1 }
+    });
+    if (!refCreated) {
+      refStatRecord.clicks += 1;
+      await refStatRecord.save();
+    }
+
+    // 6. ประกอบ URL แล้วเตะส่งต่อ
     let finalUrl = link.originalUrl + (link.parameter || '');
     if (targetChannel !== 'organic/direct') {
       const joinChar = finalUrl.includes('?') ? '&' : '?';
