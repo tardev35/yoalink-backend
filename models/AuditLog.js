@@ -10,18 +10,26 @@ const AuditLog = sequelize.define('AuditLog', {
     autoIncrement: true
   },
   action: {
-    type: DataTypes.STRING, // เช่น 'CREATE_LINK', 'UPDATE_DOMAIN', 'DELETE_LINK'
+    type: DataTypes.STRING, 
     allowNull: false
   },
   details: {
-    type: DataTypes.JSON, // 📦 เก็บข้อมูลยืดหยุ่น เช่น { oldDomain: 'a.com', newDomain: 'b.com' }
+    type: DataTypes.JSON, 
+    allowNull: true
+  },
+  // 🔥 เพิ่ม 2 ฟิลด์นี้เพื่อเก็บร่องรอย IP และสถานที่
+  ipAddress: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  location: {
+    type: DataTypes.STRING,
     allowNull: true
   }
 }, {
-  timestamps: true // ⏰ จะมี createdAt ไว้บอกว่าทำ "เวลาไหน" อัตโนมัติ
+  timestamps: true 
 });
 
-// ผูกประวัติว่าใครเป็นคนทำ (User -> AuditLog)
 AuditLog.belongsTo(User, { foreignKey: 'userId' });
 User.hasMany(AuditLog, { foreignKey: 'userId' });
 

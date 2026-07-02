@@ -7,7 +7,7 @@ const User = require('../models/User');
 const AuditLog = require('../models/AuditLog'); // 🔥 นำเข้าระบบบันทึกประวัติ
 const auth = require('../middleware/auth');
 const router = express.Router();
-
+const createAuditLog = require('../utils/logger');
 // 📋 1. GET: ดึงรายการลิงก์ย่อทั้งหมด (อัปเกรดส่งตัวนับจำนวนลิงก์ทั้งหมด)
 router.get('/', auth, async (req, res) => {
   try {
@@ -128,14 +128,7 @@ router.post('/', auth, async (req, res) => {
     });
 
     // 🕵️‍♂️ แอบบันทึกประวัติการสร้างลิงก์ (Audit Log)
-    await AuditLog.create({
-      userId: req.user.id,
-      action: 'CREATE_LINK',
-      details: { 
-        alias: activeLink.alias, 
-        targetUrl: activeLink.originalUrl 
-      }
-    });
+    await createAuditLog(req, 'CREATE_LINK', { alias: activeLink.alias, targetUrl: activeLink.originalUrl })
 
     res.status(201).json(activeLink);
   } catch (error) {

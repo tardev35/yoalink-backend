@@ -6,6 +6,7 @@ const Link = require('../models/Link');
 const AuditLog = require('../models/AuditLog'); // 🔥 นำเข้าระบบบันทึกประวัติ
 const auth = require('../middleware/auth');
 const router = express.Router();
+const createAuditLog = require('../utils/logger');
 
 // 🛡️ Middleware ด่านตรวจ: เฉพาะ Admin
 const isAdmin = async (req, res, next) => {
@@ -33,11 +34,7 @@ router.put('/users/:id/role', [auth, isAdmin], async (req, res) => {
     user.role = req.body.role;
     await user.save();
 
-    await AuditLog.create({
-      userId: req.user.id,
-      action: 'UPDATE_ROLE',
-      details: { targetUser: user.username, fromRole: oldRole, toRole: user.role }
-    });
+    await createAuditLog(req, 'CREATE_LINK', { alias: activeLink.alias, targetUrl: activeLink.originalUrl })
 
     res.json({ message: 'อัปเดตสิทธิ์สำเร็จ', user });
   } catch (error) { res.status(500).json({ message: 'Error updating role' }); }
