@@ -217,4 +217,57 @@ router.get('/logs', [auth, isAdmin], async (req, res) => {
   }
 });
 
+// ==========================================
+// 🤝 5. ระบบโอนสิทธิ์ลิงก์ผ่าน Alias แบบกลุ่ม (Batch Transfer) 🔥 ตัวใหม่ล่าสุด
+// ==========================================
+router.post('/links/transfer-by-alias', [auth, isAdmin], async (req, res) => {
+  try {
+    const { aliases, newUserId } = req.body;
+
+    if (!aliases || !Array.isArray(aliases) || aliases.length === 0) {
+      return res.status(400).json({ message: 'กรุณาระบุรายการ Alias ให้ถูกต้อง' });
+    }
+
+    if (!newUserId) {
+      return res.status(400).json({ message: 'กรุณาระบุพนักงานปลายทางที่จะรับโอนสิทธิ์' });
+    }
+
+    // 🕵️‍♂️ เช็กว่าพนักงานปลายทางมีตัวตนจริงไหม
+    const targetUser = await User.findByPk(newUserId);
+    if (!targetUser) {
+      return res.status(404).json({ message: 'ไม่พบพนักงานปลายทางในระบบ' });
+    }
+
+    // 🛠️ สั่งอัปเดตทุกลิงก์ที่ตรงกับรายชื่อ Alias ที่ส่งมา
+    const [updatedCount] = await Link.update(
+      { 
+        userId: targetUser.id, 
+        createdBy: targetUser.id 
+      },
+      { 
+        where: { alias: aliases } 
+      }
+    );
+
+    if (updatedCount === 0) {
+      return res.status(404).json({ message: 'ไม่พบข้อมูลลิงก์ที่ตรงกับ Alias ที่ระบุในระบบ' });
+    }
+
+    // 🔥 บันทึกประวัติสายลับพร้อม IP และสถานที่
+    await createAuditLog(req, 'UPDATE_LINK_OWNER_BATCH', {
+      aliasesCount: updatedCount,
+      toUser: targetUser.username,
+      sampleAliases: aliases.slice(0, 5) // เก็บตัวอย่าง Alias 5 ตัวแรกใน Log
+    });
+
+    res.json({ 
+      message: `โอนกรรมสิทธิ์จำนวน ${updatedCount} ลิงก์ ให้พนักงาน "${targetUser.username}" เรียบร้อยแล้วครับ!` 
+    });
+
+  } catch (error) {
+    console.error('Batch Transfer Error:', error);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดในการโอนกรรมสิทธิ์แบบกลุ่ม' });
+  }
+});
+
 module.exports = router;
