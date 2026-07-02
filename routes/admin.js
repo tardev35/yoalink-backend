@@ -33,7 +33,6 @@ router.put('/users/:id/role', [auth, isAdmin], async (req, res) => {
     user.role = req.body.role;
     await user.save();
 
-    // 🕵️‍♂️ แอบบันทึกประวัติการเปลี่ยนสิทธิ์
     await AuditLog.create({
       userId: req.user.id,
       action: 'UPDATE_ROLE',
@@ -48,7 +47,6 @@ router.delete('/users/:id', [auth, isAdmin], async (req, res) => {
   try {
     const userToDel = await User.findByPk(req.params.id);
     if(userToDel) {
-      // 🕵️‍♂️ แอบบันทึกประวัติการลบพนักงาน
       await AuditLog.create({
         userId: req.user.id, action: 'DELETE_USER', details: { deletedUser: userToDel.username }
       });
@@ -74,7 +72,6 @@ router.post('/domains', [auth, isAdmin], async (req, res) => {
     
     const newDomain = await Domain.create({ name, createdBy: req.user.id });
 
-    // 🕵️‍♂️ แอบบันทึกประวัติการเพิ่มโดเมน
     await AuditLog.create({
       userId: req.user.id, action: 'CREATE_DOMAIN', details: { domain: name }
     });
@@ -83,7 +80,47 @@ router.post('/domains', [auth, isAdmin], async (req, res) => {
   } catch (error) { res.status(500).json({ message: 'Error creating domain' }); }
 });
 
-// 🔥 อัปเกรด V3 (Background Task) + 🛡️ Audit Log
+// 🔥 อัปเกรด: เพิ่มระบบ 🔄 โอนย้ายลิงก์ข้ามโดเมน (Migrate Domain)
+router.post('/domains/migrate', [auth, isAdmin], async (req, res) => {
+  try {
+    const { fromDomainId, toDomainId } = req.body;
+    
+    if (fromDomainId === toDomainId) {
+      return res.status(400).json({ message: 'โดเมนต้นทางและปลายทางเป็นอันเดียวกัน' });
+    }
+
+    const fromDomain = await Domain.findByPk(fromDomainId);
+    const toDomain = await Domain.findByPk(toDomainId);
+
+    if (!fromDomain || !toDomain) return res.status(404).json({ message: 'ไม่พบข้อมูลโดเมนที่ระบุ' });
+
+    // 1. นับจำนวนลิงก์ที่จะย้าย
+    const linksToMigrate = await Link.findAll({ where: { domainId: fromDomain.id } });
+    const linkCount = linksToMigrate.length;
+
+    if (linkCount === 0) return res.status(400).json({ message: 'ไม่มีลิงก์ในโดเมนเก่าให้ย้ายเลยครับลูกพี่' });
+
+    // 2. ย้ายโอน domainId ของทุกลิงก์ไปหาโดเมนใหม่
+    await Link.update({ domainId: toDomain.id }, { where: { domainId: fromDomain.id } });
+
+    // 🕵️‍♂️ 3. แอบบันทึกประวัติการย้าย (Audit Log)
+    await AuditLog.create({
+      userId: req.user.id,
+      action: 'MIGRATE_DOMAIN',
+      details: { fromDomain: fromDomain.name, toDomain: toDomain.name, migratedCount: linkCount }
+    });
+
+    // 4. สั่งกรรมกรวิ่งแก้ URL เบื้องหลัง 
+    updateLinksInBackground(toDomain.id, toDomain.name).catch(err => console.error('BG Error:', err));
+
+    res.json({ message: `เริ่มย้าย ${linkCount} ลิงก์ไปยัง ${toDomain.name} สำเร็จ! กำลังแก้ URL ปลายทางอยู่เบื้องหลัง` });
+
+  } catch (error) {
+    console.error('Migrate Domain Error:', error);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดในการโอนย้ายโดเมน' });
+  }
+});
+
 router.put('/domains/:id', [auth, isAdmin], async (req, res) => {
   try {
     const domain = await Domain.findByPk(req.params.id);
@@ -92,11 +129,10 @@ router.put('/domains/:id', [auth, isAdmin], async (req, res) => {
     const newDomainName = req.body.name.trim();
 
     if (domain.name !== newDomainName) {
-      const oldDomainName = domain.name; // เก็บชื่อเก่าไว้ทำ Log
+      const oldDomainName = domain.name;
       domain.name = newDomainName;
       await domain.save(); 
 
-      // 🕵️‍♂️ แอบบันทึกประวัติการแก้โดเมน (สำคัญมาก!)
       await AuditLog.create({
         userId: req.user.id,
         action: 'UPDATE_DOMAIN',
@@ -115,7 +151,6 @@ router.delete('/domains/:id', [auth, isAdmin], async (req, res) => {
   try {
     const domainToDel = await Domain.findByPk(req.params.id);
     if(domainToDel) {
-      // 🕵️‍♂️ แอบบันทึกประวัติการลบโดเมน
       await AuditLog.create({
         userId: req.user.id, action: 'DELETE_DOMAIN', details: { domain: domainToDel.name }
       });
@@ -172,7 +207,6 @@ router.put('/tags', [auth, isAdmin], async (req, res) => {
         link.changed('tags', true); await link.save();
       }
     }
-    // 🕵️‍♂️ แอบบันทึกประวัติการเปลี่ยนชื่อแท็กส่วนกลาง
     await AuditLog.create({ userId: req.user.id, action: 'RENAME_TAG', details: { oldTag, newTag } });
     res.json({ message: 'เปลี่ยนชื่อแท็กสำเร็จ' });
   } catch (error) { res.status(500).json({ message: 'Error renaming tag' }); }
@@ -188,7 +222,6 @@ router.delete('/tags', [auth, isAdmin], async (req, res) => {
         link.changed('tags', true); await link.save();
       }
     }
-    // 🕵️‍♂️ แอบบันทึกประวัติการลบแท็กส่วนกลาง
     await AuditLog.create({ userId: req.user.id, action: 'DELETE_TAG', details: { tag } });
     res.json({ message: 'ลบแท็กสำเร็จ' });
   } catch (error) { res.status(500).json({ message: 'Error deleting tag' }); }
