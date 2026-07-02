@@ -35,6 +35,7 @@ Link.hasMany(LinkReferrerStat, { foreignKey: 'linkId', onDelete: 'CASCADE' });
 LinkReferrerStat.belongsTo(Link, { foreignKey: 'linkId' });
 
 const app = express();
+app.set('trust proxy', 1);
 app.use(helmet()); 
 app.disable('x-powered-by'); 
 
