@@ -141,7 +141,7 @@ app.get('/:alias', async (req, res) => {
 });
 
 const PORT = 5000;
-sequelize.sync().then(() => {
+sequelize.sync({ alter: true }).then(() => {
   console.log('📦 Database Tables Synced Successfully!');
   app.listen(PORT, () => {
     console.log(`🚀 Yoalink Core Backend running on port ${PORT} with High Security Mode`);
