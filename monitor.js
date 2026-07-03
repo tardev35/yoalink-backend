@@ -78,11 +78,15 @@ async function startMonitoring() {
       await sleep(500); 
     }
 
+   // 🚨 4. สรุปผลรายงาน
     if (brokenLinks.length > 0) {
       const summaryMessage = `❌ *พบชอร์ตลิงก์พังในระบบ!* \n\nมีลิงก์ย่อไม่ตอบสนองจำนวน *${brokenLinks.length}* รายการ:\n${brokenLinks.join('\n')}`;
       await sendTelegram(summaryMessage);
     } else {
       console.log('✅ ตรวจสอบเสร็จสิ้น: ทุกลิงก์ย่อปกติดี 100%');
+      
+      // 🔥 เพิ่มบรรทัดนี้เข้าไป เพื่อบังคับให้มันทักไปบอกใน Telegram ว่าตรวจเสร็จแล้ว
+      await sendTelegram(`✅ *สถานะระบบปัจจุบัน:* ตรวจสอบลิงก์ย่อทั้งหมด ${links.length} รายการ ปกติดี 100% ไม่มีลิงก์พังครับ 🚀`);
     }
 
     process.exit(0);
