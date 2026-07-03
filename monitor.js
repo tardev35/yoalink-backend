@@ -1,55 +1,96 @@
 /* backend/monitor.js */
 const axios = require('axios');
+const sequelize = require('./db'); 
 const Link = require('./models/Link');
 
+// ⚙️ ตั้งค่าของลูกพี่
 const TELEGRAM_TOKEN = '8534286548:AAGDg5zML-FjirlbYryUKMYOa6DRG538Qh8';
 const CHAT_ID = '-5415283024';
+const MAIN_DOMAIN = 'https://yoalink.com'; 
 
 async function sendTelegram(msg) {
-    try {
-        await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-            chat_id: CHAT_ID,
-            text: msg,
-            parse_mode: 'Markdown'
+  try {
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
+      chat_id: CHAT_ID,
+      text: msg,
+      parse_mode: 'Markdown'
+    });
+  } catch (err) {
+    console.error('❌ ไม่สามารถส่งข้อความเข้า Telegram ได้:', err.message);
+  }
+}
+
+// 💤 ฟังก์ชันสั่งให้บอทหยุดพักหายใจ ป้องกันโดนแบน
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function startMonitoring() {
+  console.log('🚀 เริ่มต้นระบบ Automation ตรวจสอบลิงก์ย่อ...');
+
+  try {
+    await sequelize.authenticate();
+  } catch (dbConnectError) {
+    await sendTelegram(`🚨 *ระบบฐานข้อมูลพัง!* \nตัวมอนิเตอร์ไม่สามารถเชื่อมต่อฐานข้อมูลได้`);
+    process.exit(1);
+  }
+
+  try {
+    await axios.get(MAIN_DOMAIN, { timeout: 6000 });
+  } catch (error) {
+    const status = error.response?.status;
+    if (status === 502 || status === 503 || status === 504 || !error.response) {
+      await sendTelegram(`🚨 *Yoalink Server DOWN!* \nสถานะ: *${status || 'ดับสนิท/Timeout'}*\nเซิร์ฟเวอร์หลักพัง เข้าใช้งานไม่ได้!`);
+      process.exit(1); 
+    }
+  }
+
+  try {
+    const links = await Link.findAll({ attributes: ['alias'] });
+    console.log(`📊 พบลิงก์ย่อทั้งหมด ${links.length} รายการ กำลังเริ่มตรวจ...`);
+
+    let brokenLinks = [];
+
+    for (let link of links) {
+      const targetUrl = `${MAIN_DOMAIN}/${link.alias}`;
+      try {
+        await axios.get(targetUrl, { 
+          maxRedirects: 0, 
+          timeout: 5000,
+          // 🔥 จับบอทใส่เสื้อผ้า ปลอมตัวเป็นคนใช้ Google Chrome บน Windows
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7'
+          }
         });
-    } catch (err) { console.error('Telegram Error'); }
-}
+      } catch (linkError) {
+        const responseStatus = linkError.response?.status;
 
-async function startCheck() {
-    // 1. เช็กสภาพ Nginx ก่อนเลยว่า 502 ไหม
-    try {
-        const mainServer = await axios.get('https://yoalink.com', { timeout: 5000 });
-    } catch (error) {
-        if (error.response?.status === 502 || !error.response) {
-            await sendTelegram(`🚨 *Yoalink Server DOWN!* \nสถานะ: 502 Bad Gateway หรือเซิร์ฟเวอร์ดับสนิท ด่วนที่สุดลุกพี่!`);
-            process.exit(1);
+        // ถ้าตอบ 301/302 แปลว่าลิงก์ปกติ
+        if (responseStatus && responseStatus >= 300 && responseStatus < 400) {
+          // ปล่อยผ่าน
+        } else {
+          console.log(`❌ ลิงก์พัง: ${targetUrl} (Status: ${responseStatus || 'Timeout'})`);
+          brokenLinks.push(`- ${link.alias} (Status: ${responseStatus || 'ดับ/Timeout'})`);
         }
+      }
+      
+      // ⏱️ สั่งบอทหยุดพัก 0.5 วินาที ก่อนเช็กคิวต่อไป (กันเซิร์ฟเวอร์เตะก้านคอ 500)
+      await sleep(500); 
     }
 
-    // 2. ถ้าเซิร์ฟเวอร์หลักรอด ดึงลิงก์จากฐานข้อมูล SQLite มาไล่เช็กรายตัว
-    try {
-        const links = await Link.findAll({ attributes: ['alias'] });
-        console.log(`🕵️‍♂️ กำลังตรวจสอบลิงก์ทั้งหมด ${links.length} รายการ...`);
-
-        for (let link of links) {
-            try {
-                // ยิงเช็กโดยห้ามไม่ให้ติดตามไปหน้าเว็บปลายทาง (maxRedirects: 0)
-                await axios.get(`https://yoalink.com/${link.alias}`, {
-                    maxRedirects: 0,
-                    timeout: 4000,
-                    validateStatus: (status) => status >= 200 && status < 400 // 2xx และ 3xx คือผ่าน
-                });
-            } catch (linkError) {
-                // ถ้าลิงก์ไหนพัง ส่งสัญญาณเตือนเข้า Telegram ทันที
-                await sendTelegram(`❌ *พบลิงก์ย่อพัง!* \nลิงก์: yoalink.com/${link.alias}\nError: ${linkError.message}`);
-            }
-        }
-        console.log('✅ ตรวจสอบครบทุก LINK เรียบร้อย');
-        process.exit(0);
-    } catch (dbError) {
-        await sendTelegram(`❌ ระบบตรวจสอบพัง: ไม่สามารถอ่านฐานข้อมูลได้`);
-        process.exit(1);
+    if (brokenLinks.length > 0) {
+      const summaryMessage = `❌ *พบชอร์ตลิงก์พังในระบบ!* \n\nมีลิงก์ย่อไม่ตอบสนองจำนวน *${brokenLinks.length}* รายการ:\n${brokenLinks.join('\n')}`;
+      await sendTelegram(summaryMessage);
+    } else {
+      console.log('✅ ตรวจสอบเสร็จสิ้น: ทุกลิงก์ย่อปกติดี 100%');
     }
+
+    process.exit(0);
+
+  } catch (dbError) {
+    await sendTelegram(`❌ *ระบบตรวจสอบเอ๋อ:* ไม่สามารถดึงข้อมูลรายชื่อลิงก์จากตารางได้`);
+    process.exit(1);
+  }
 }
 
-startCheck();
+startMonitoring();
