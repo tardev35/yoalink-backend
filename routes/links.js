@@ -257,27 +257,36 @@ router.get('/:id/time-stats', auth, async (req, res) => {
     }
 
     const clickLogs = await LinkClickLog.findAll({ where: { linkId: req.params.id }, attributes: ['createdAt'], raw: true });
+    
+    // สร้างตารางชั่วโมง 00:00 - 23:00
     const hourlyGrid = {};
     for (let i = 0; i < 24; i++) { 
       hourlyGrid[String(i).padStart(2, '0')] = 0; 
     }
 
+    // สร้างตารางรายวันล่วงหน้า 7 วัน
     const dailyGrid = {};
     for (let i = 6; i >= 0; i--) {
       const d = new Date(); 
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toLocaleDateString('th-TH', { day: '2-digit', month: 'short' });
+      // 🔥 จุดแก้ที่ 1: บังคับให้การนับวันอิงตาม Timezone ประเทศไทย (Asia/Bangkok)
+      const tzTime = new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Bangkok' }));
+      tzTime.setDate(tzTime.getDate() - i);
+      const dateStr = tzTime.toLocaleDateString('th-TH', { day: '2-digit', month: 'short' });
       dailyGrid[dateStr] = 0;
     }
 
     clickLogs.forEach(log => {
-      const dateObj = new Date(log.createdAt);
-      const hourStr = String(dateObj.getHours()).padStart(2, '0');
+      const originalDate = new Date(log.createdAt);
+      
+      // 🔥 จุดแก้ที่ 2: แปลงเวลา Database (UTC) ให้เป็นเวลาไทย (+7) ก่อนดึงชั่วโมง
+      const tzDateObj = new Date(originalDate.toLocaleString('en-US', { timeZone: 'Asia/Bangkok' }));
+      
+      const hourStr = String(tzDateObj.getHours()).padStart(2, '0');
       if (hourlyGrid[hourStr] !== undefined) {
         hourlyGrid[hourStr] += 1;
       }
 
-      const dateStr = dateObj.toLocaleDateString('th-TH', { day: '2-digit', month: 'short' });
+      const dateStr = tzDateObj.toLocaleDateString('th-TH', { day: '2-digit', month: 'short' });
       if (dailyGrid[dateStr] !== undefined) {
         dailyGrid[dateStr] += 1;
       }
@@ -293,6 +302,7 @@ router.get('/:id/time-stats', auth, async (req, res) => {
 
     res.json({ hourly: hourlyData, daily: dailyData });
   } catch (error) {
+    console.error('Time Stats Error:', error);
     res.status(500).json({ message: 'เกิดข้อผิดพลาดในการคำนวณช่วงเวลาทองคำ' });
   }
 });
