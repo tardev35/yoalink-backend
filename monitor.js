@@ -3,11 +3,13 @@ require('dotenv').config(); // อย่าลืมลง npm install dotenv �
 const axios = require('axios');
 const sequelize = require('./db'); 
 const Link = require('./models/Link');
-const token = process.env.TELEGRAM_BOT_TOKEN;
+const token = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
 // ⚙️ ตั้งค่าของลูกพี่
 const TELEGRAM_TOKEN = token;
-const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+const CHAT_ID = (process.env.TELEGRAM_CHAT_ID || '').trim();
 const MAIN_DOMAIN = 'https://yoalink.com'; 
+
+console.log('🔍 เช็ก Token ที่ดูดมาได้:', TELEGRAM_TOKEN ? 'มีข้อมูล' : 'ว่างเปล่า!! (เช็กไฟล์ .env ด่วน)');
 
 async function sendTelegram(msg) {
   try {
