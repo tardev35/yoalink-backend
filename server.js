@@ -57,6 +57,27 @@ app.use('/api/domains', require('./routes/domains'));
 app.use('/api/admin', require('./routes/admin'));
 
 // 🚀 ระบบ Redirect ลิงก์ย่อ พร้อมรวบรวมข้อมูล 5 โมดูล
+// ==========================================
+// 🛡️ ระบบ Anti-Bot & Anti-Spam (แบบ In-Memory ปลอดภัย 100%)
+// ==========================================
+const BOT_USER_AGENTS = [
+  'bot', 'spider', 'crawler', 'preview', 'facebookexternalhit', 'line', 'twitterbot',
+  'telegrambot', 'whatsapp', 'googlebot', 'bingbot', 'yandexbot',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+];
+
+// ตัวแปรจำ IP และจำนวนคลิกในหน่วยความจำชั่วคราว
+const ipClickTracker = new Map();
+
+// ระบบล้างแคชอัตโนมัติ (เคลียร์ IP ที่เก่าเกิน 1 นาทีทิ้ง เพื่อไม่ให้กิน RAM)
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, data] of ipClickTracker.entries()) {
+    if (now - data.timestamp > 60000) ipClickTracker.delete(ip);
+  }
+}, 60000);
+
+// 🚀 ระบบ Redirect ลิงก์ย่อ พร้อมรวบรวมข้อมูล 5 โมดูล
 app.get('/:alias', async (req, res) => {
   try {
     const { alias } = req.params;
@@ -66,12 +87,7 @@ app.get('/:alias', async (req, res) => {
       return res.status(404).send(`<h1 style="text-align:center;margin-top:100px;">❌ 404 Not Found</h1>`);
     }
 
-    // 1. บวกยอดคลิกรวม
-    link.clicks += 1;
-    await link.save();
-
-    // 2. 🔥 โมดูล 1: คัดแยกพารามิเตอร์ช่องทาง (อัปเกรดระบบ Key => Value)
-    // รองรับทั้งแบบใหม่ (?s=1) และเผื่อแบบเก่า (?src=fb) ที่อาจจะมีคนเอาไปแปะแล้ว
+    // --- 🎯 เตรียม URL เป้าหมายและช่องทาง ---
     let rawS = (req.query.s || '').toString().trim();
     let rawSrc = (req.query.src || '').toLowerCase().trim();
     let targetChannel = 'organic/direct'; 
@@ -83,29 +99,66 @@ app.get('/:alias', async (req, res) => {
     else if (rawS === '4' || rawSrc === 'sms') { targetChannel = 'sms'; forwardParam = '4'; }
     else if (rawS === '5' || rawSrc === 'seo') { targetChannel = 'seo'; forwardParam = '5'; }
 
+    let finalUrl = link.originalUrl + (link.parameter || '');
+    if (targetChannel !== 'organic/direct') {
+      const joinChar = finalUrl.includes('?') ? '&' : '?';
+      finalUrl = `${finalUrl}${joinChar}s=${forwardParam}`;
+    }
+
+    // ==========================================
+    // 🛡️ ด่านกรองบอท & สแปมคลิก (เริ่มทำงาน)
+    // ==========================================
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'Unknown';
+    const ua = (req.get('user-agent') || '').toLowerCase();
+
+    // ด่านที่ 1: ตรวจจับ Bot ของ Social Media และ Bot สายตรวจ
+    const isBot = BOT_USER_AGENTS.some(b => ua.includes(b));
+    
+    // ด่านที่ 2: ตรวจจับการกดสแปมคลิก (เกิน 30 ครั้ง ภายใน 1 นาที)
+    let isSpam = false;
+    const now = Date.now();
+    
+    if (ipClickTracker.has(clientIp)) {
+      const data = ipClickTracker.get(clientIp);
+      if (now - data.timestamp < 60000) {
+        data.count += 1;
+        if (data.count > 30) isSpam = true; // 🚨 สแปมแน่นอน!
+      } else {
+        ipClickTracker.set(clientIp, { count: 1, timestamp: now }); // รีเซ็ตเมื่อพ้น 1 นาที
+      }
+    } else {
+      ipClickTracker.set(clientIp, { count: 1, timestamp: now });
+    }
+
+    // 🥷 ทำงานแบบแบนเงียบ (Silent Pass)
+    if (isBot || isSpam) {
+      console.log(`🛡️ [Anti-Bot] ดักจับผู้ต้องสงสัย IP: ${clientIp} | Bot: ${isBot} | Spam: ${isSpam} (ส่งผ่านแต่ไม่บันทึกสถิติ)`);
+      return res.redirect(finalUrl); 
+    }
+
+    // ==========================================
+    // 📊 บันทึกสถิติ (ทำงานเมื่อเป็นคนปกติเท่านั้น)
+    // ==========================================
+    link.clicks += 1;
+    await link.save();
+
     const [statRecord, created] = await LinkChannelStat.findOrCreate({
-      where: { linkId: link.id, channel: targetChannel },
-      defaults: { clicks: 1 }
+      where: { linkId: link.id, channel: targetChannel }, defaults: { clicks: 1 }
     });
     if (!created) { statRecord.clicks += 1; await statRecord.save(); }
 
-    // 3. โมดูล 2: บันทึกเวลาคลิก
     await LinkClickLog.create({ linkId: link.id, channel: targetChannel });
 
-    // 4. โมดูล 3: วิเคราะห์อุปกรณ์ผู้ใช้
-    const ua = req.get('user-agent') || '';
     let detectedPlatform = 'Other';
     if (/iphone|ipad|ipod/i.test(ua)) detectedPlatform = 'iOS';
     else if (/android/i.test(ua)) detectedPlatform = 'Android';
     else if (/windows|macintosh|linux/i.test(ua)) detectedPlatform = 'Desktop';
 
     const [devRecord, devCreated] = await LinkClickDevice.findOrCreate({
-      where: { linkId: link.id, platform: detectedPlatform },
-      defaults: { clicks: 1 }
+      where: { linkId: link.id, platform: detectedPlatform }, defaults: { clicks: 1 }
     });
     if (!devCreated) { devRecord.clicks += 1; await devRecord.save(); }
 
-    // 5. โมดูล 5: ดักจับและแกะรอยโดเมนต้นทาง (HTTP Referer)
     const refererHeader = req.get('Referer') || req.get('Referrer') || '';
     let detectedReferrer = 'Direct, Email, SMS'; 
 
@@ -119,25 +172,20 @@ app.get('/:alias', async (req, res) => {
     }
 
     const [refStatRecord, refCreated] = await LinkReferrerStat.findOrCreate({
-      where: { linkId: link.id, referrerDomain: detectedReferrer },
-      defaults: { clicks: 1 }
+      where: { linkId: link.id, referrerDomain: detectedReferrer }, defaults: { clicks: 1 }
     });
     if (!refCreated) {
       refStatRecord.clicks += 1;
       await refStatRecord.save();
     }
 
-    // 6. 🚀 ประกอบ URL ส่งต่อไปเว็บหลัก (แนบแบบสั้น ?s=X ไปด้วย)
-    let finalUrl = link.originalUrl + (link.parameter || '');
-    if (targetChannel !== 'organic/direct') {
-      const joinChar = finalUrl.includes('?') ? '&' : '?';
-      finalUrl = `${finalUrl}${joinChar}s=${forwardParam}`;
-    }
-
+    // 🚀 ส่งลูกค้าจริงๆ ไปปลายทาง
     res.redirect(finalUrl);
+
   } catch (error) {
     console.error('Redirect Error:', error);
-    res.status(500).send('<h1>🛠️ 500 Server Error</h1>');
+    // ป้องกันหน้าพัง ถ้าสถิติเซฟไม่ได้ ก็ยังต้องส่งคนไปปลายทางให้ได้
+    res.status(500).send('<h1>🛠️ กำลังพาท่านไปยังปลายทาง... โปรดรอสักครู่</h1><script>setTimeout(function(){location.reload()}, 2000)</script>');
   }
 });
 
