@@ -62,10 +62,11 @@ app.use('/api/admin', require('./routes/admin'));
 app.use('/', require('./routes/redirect'));
 
 const PORT = 5000;
-sequelize.sync().then(() => {
+// 🔥 ใส่ { alter: true } เพื่อบังคับให้มันสร้างคอลัมน์ใหม่ที่ขาดไป
+sequelize.sync({ alter: true }).then(() => {
   console.log('📦 Database Tables Synced Successfully!');
   app.listen(PORT, () => {
-    console.log(`🚀 Yoalink Core Backend running on port ${PORT} with High Security Mode`);
+    console.log(`🚀 Yoalink Core Backend running on port ${PORT}`);
   });
 }).catch(err => {
   console.error('❌ Failed to sync database:', err);
