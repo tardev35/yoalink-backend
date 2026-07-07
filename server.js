@@ -15,6 +15,7 @@ const LinkClickLog = require('./models/LinkClickLog');
 const LinkClickDevice = require('./models/LinkClickDevice'); 
 const LinkReferrerStat = require('./models/LinkReferrerStat')
 const AuditLog = require('./models/AuditLog'); 
+const BlockedIp = require('./models/BlockedIp'); 
 
 // 🤝 ประกาศผูกความสัมพันธ์ระหว่างตาราง (Associations)
 Link.belongsTo(User, { foreignKey: 'userId' });

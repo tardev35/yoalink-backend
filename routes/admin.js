@@ -7,6 +7,9 @@ const AuditLog = require('../models/AuditLog');
 const createAuditLog = require('../utils/logger'); // 🔥 เรียกใช้ฟังก์ชันสายลับดัก IP
 const auth = require('../middleware/auth');
 const router = express.Router();
+const LinkClickLog = require('../models/LinkClickLog');
+const BlockedIp = require('../models/BlockedIp');
+const { Op, Sequelize } = require('sequelize');
 
 // 🛡️ Middleware ด่านตรวจ: เฉพาะ Admin
 const isAdmin = async (req, res, next) => {
@@ -267,6 +270,56 @@ router.post('/links/transfer-by-alias', [auth, isAdmin], async (req, res) => {
   } catch (error) {
     console.error('Batch Transfer Error:', error);
     res.status(500).json({ message: 'เกิดข้อผิดพลาดในการโอนกรรมสิทธิ์แบบกลุ่ม' });
+  }
+});
+
+// 🕵️‍♂️ API: ดึงรายชื่อ IP ต้องสงสัย (กดเกิน 50 ครั้งใน 24 ชม.)
+router.get('/bots/suspicious', auth, isAdmin, async (req, res) => {
+  try {
+    const oneDayAgo = new Date(new Date() - 24 * 60 * 60 * 1000);
+    
+    // ดึง IP ที่มีการคลิกรวมกันมากที่สุดในช่วง 24 ชม.
+    const suspiciousIps = await LinkClickLog.findAll({
+      attributes: [
+        'ipAddress',
+        [Sequelize.fn('COUNT', Sequelize.col('id')), 'totalClicks'],
+        [Sequelize.fn('MAX', Sequelize.col('createdAt')), 'lastSeen']
+      ],
+      where: { createdAt: { [Op.gte]: oneDayAgo }, ipAddress: { [Op.not]: 'Unknown' } },
+      group: ['ipAddress'],
+      having: Sequelize.literal('COUNT(id) > 20'), // ถ้ายอดกดเกิน 20 ครั้ง/วัน ให้โชว์ในตารางให้แอดมินดู
+      order: [[Sequelize.fn('COUNT', Sequelize.col('id')), 'DESC']],
+      limit: 50
+    });
+
+    // เช็กสถานะว่า IP เหล่านี้โดนแบนไปหรือยัง
+    const blockedIps = await BlockedIp.findAll({ attributes: ['ipAddress'] });
+    const blockedIpSet = new Set(blockedIps.map(b => b.ipAddress));
+
+    const result = suspiciousIps.map(s => ({
+      ip: s.ipAddress,
+      clicks: parseInt(s.get('totalClicks')),
+      lastSeen: s.get('lastSeen'),
+      isBlocked: blockedIpSet.has(s.ipAddress)
+    }));
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching bots' });
+  }
+});
+
+// 🔨 API: สั่งบล็อก IP ถาวร
+router.post('/bots/block', auth, isAdmin, async (req, res) => {
+  try {
+    const { ipAddress } = req.body;
+    await BlockedIp.findOrCreate({
+      where: { ipAddress },
+      defaults: { reason: 'แบนโดยแอดมิน (พฤติกรรมบอท)' }
+    });
+    res.json({ message: `บล็อก IP: ${ipAddress} เรียบร้อยแล้ว` });
+  } catch (error) {
+    res.status(500).json({ message: 'Error blocking IP' });
   }
 });
 
