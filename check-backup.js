@@ -4,7 +4,7 @@ const path = require('path');
 
 // ⚠️ ลูกพี่เปลี่ยนชื่อไฟล์และพาธตรงนี้ ให้ตรงกับไฟล์ Backup ของเมื่อคืนนะครับ
 // เช่น './backups/db-2026-07-06.sqlite' หรือชื่อที่ระบบแบคอัพไว้
-const backupFilePath = path.join(__dirname, 'database_backup_name.sqlite'); 
+const backupFilePath = path.join(__dirname, 'db_backup_20260707_0200.sqlite'); 
 
 async function checkBackup() {
   console.log(`🔍 กำลังแอบส่องไฟล์ Backup: ${backupFilePath}`);
