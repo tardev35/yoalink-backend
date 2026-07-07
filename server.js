@@ -62,8 +62,8 @@ app.use('/api/admin', require('./routes/admin'));
 app.use('/', require('./routes/redirect'));
 
 const PORT = 5000;
-// 🔥 ใส่ { alter: true } เพื่อบังคับให้มันสร้างคอลัมน์ใหม่ที่ขาดไป
-sequelize.sync({ alter: true }).then(() => {
+// เปลี่ยนจาก sequelize.sync({ alter: true }) กลับมาเป็นแบบเดิม
+sequelize.sync().then(() => {
   console.log('📦 Database Tables Synced Successfully!');
   app.listen(PORT, () => {
     console.log(`🚀 Yoalink Core Backend running on port ${PORT}`);
