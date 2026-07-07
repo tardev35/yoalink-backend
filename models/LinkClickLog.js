@@ -11,9 +11,8 @@ const LinkClickLog = sequelize.define('LinkClickLog', {
     type: DataTypes.STRING,
     allowNull: true
   }
-  // (ถ้ามีคอลัมน์ ipAddress อยู่ก็ปล่อยไว้เหมือนเดิมครับ)
 }, {
-  // 🔥 เพิ่ม 2 บรรทัดนี้เข้าไป เพื่อบอกว่า "ขอแค่ createdAt นะ ไม่เอา updatedAt"
+  // 🔥 หัวใจสำคัญอยู่ตรงนี้ครับ: สั่งระบบว่าเอาแค่ createdAt ไม่ต้องพยายามหา updatedAt
   timestamps: true,
   updatedAt: false
 });
