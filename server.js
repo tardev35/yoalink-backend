@@ -147,8 +147,6 @@ app.get('/:alias', async (req, res) => {
     });
     if (!created) { statRecord.clicks += 1; await statRecord.save(); }
 
-    await LinkClickLog.create({ linkId: link.id, channel: targetChannel });
-
     let detectedPlatform = 'Other';
     if (/iphone|ipad|ipod/i.test(ua)) detectedPlatform = 'iOS';
     else if (/android/i.test(ua)) detectedPlatform = 'Android';
@@ -170,6 +168,9 @@ app.get('/:alias', async (req, res) => {
         detectedReferrer = 'Unknown Domain'; 
       }
     }
+
+    // 📝 บันทึก log รายคลิก (มี timestamp) พร้อม referrer เพื่อใช้กรองตามช่วงเวลา
+    await LinkClickLog.create({ linkId: link.id, channel: targetChannel, referrerDomain: detectedReferrer });
 
     const [refStatRecord, refCreated] = await LinkReferrerStat.findOrCreate({
       where: { linkId: link.id, referrerDomain: detectedReferrer }, defaults: { clicks: 1 }

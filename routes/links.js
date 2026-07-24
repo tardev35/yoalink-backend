@@ -386,23 +386,39 @@ router.get('/:id/referrer-stats', auth, async (req, res) => {
       }
     }
 
-    const referrerRows = await LinkReferrerStat.findAll({
-      where: { linkId: req.params.id },
-      order: [['clicks', 'DESC']] 
-    });
+    const { range } = req.query;
+    const RANGE_MS = { '1h': 3600e3, '24h': 24 * 3600e3, '7d': 7 * 24 * 3600e3, '30d': 30 * 24 * 3600e3 };
 
-    let totalReferrerClicks = 0;
-    referrerRows.forEach(r => {
-      totalReferrerClicks += r.clicks;
-    });
+    let rawCounts; // [{ domain, clicks }] เรียงมากไปน้อย
 
-    const statsData = referrerRows.map(r => {
-      const percentage = totalReferrerClicks > 0 ? ((r.clicks / totalReferrerClicks) * 100).toFixed(2) : 0; 
-      return { 
-        domain: r.referrerDomain, 
-        clicks: r.clicks, 
-        percentage: parseFloat(percentage) 
-      };
+    if (range && RANGE_MS[range]) {
+      // ⏱️ กรองตามช่วงเวลา: aggregate จาก log รายคลิก (มีข้อมูลเฉพาะคลิกหลังเริ่มเก็บ referrerDomain)
+      const cutoff = new Date(Date.now() - RANGE_MS[range]);
+      const logs = await LinkClickLog.findAll({
+        where: {
+          linkId: req.params.id,
+          createdAt: { [Op.gte]: cutoff },
+          referrerDomain: { [Op.ne]: null }
+        }
+      });
+      const counter = {};
+      logs.forEach(l => { counter[l.referrerDomain] = (counter[l.referrerDomain] || 0) + 1; });
+      rawCounts = Object.keys(counter)
+        .map(domain => ({ domain, clicks: counter[domain] }))
+        .sort((a, b) => b.clicks - a.clicks);
+    } else {
+      // 🕓 All Time: ใช้ตัวนับสะสมเดิม (ข้อมูลครบย้อนหลัง)
+      const referrerRows = await LinkReferrerStat.findAll({
+        where: { linkId: req.params.id },
+        order: [['clicks', 'DESC']]
+      });
+      rawCounts = referrerRows.map(r => ({ domain: r.referrerDomain, clicks: r.clicks }));
+    }
+
+    const totalReferrerClicks = rawCounts.reduce((sum, r) => sum + r.clicks, 0);
+    const statsData = rawCounts.map(r => {
+      const percentage = totalReferrerClicks > 0 ? ((r.clicks / totalReferrerClicks) * 100).toFixed(2) : 0;
+      return { domain: r.domain, clicks: r.clicks, percentage: parseFloat(percentage) };
     });
 
     res.json({ totalReferrerClicks, stats: statsData });
