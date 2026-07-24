@@ -65,6 +65,21 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
+// 🏷️ ดึงรายชื่อแท็กทั้งหมด (ตามสิทธิ์: admin เห็นทุกลิงก์, user เห็นเฉพาะของตัวเอง) สำหรับ dropdown กรอง
+router.get('/tags', auth, async (req, res) => {
+  try {
+    const where = {};
+    if (req.user.role !== 'admin') where.userId = req.user.id;
+    const links = await Link.findAll({ where, attributes: ['tags'] });
+    const allTags = new Set();
+    links.forEach(l => { if (Array.isArray(l.tags)) l.tags.forEach(t => allTags.add(t)); });
+    res.json(Array.from(allTags).sort());
+  } catch (error) {
+    console.error('Fetch Tags Error:', error);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดในการดึงรายการแท็ก' });
+  }
+});
+
 // 🚀 2. POST: สร้างลิงก์ย่อใหม่ + 🛡️ Audit Log
 router.post('/', auth, async (req, res) => {
   try {
