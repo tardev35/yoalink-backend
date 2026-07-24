@@ -14,7 +14,7 @@ router.get('/', auth, async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const offset = (page - 1) * limit;
-    const { search, tag } = req.query;
+    const { search, tag, tag2 } = req.query;
 
     let whereClause = {};
     if (req.user.role !== 'admin') {
@@ -29,8 +29,16 @@ router.get('/', auth, async (req, res) => {
       ];
     }
 
-    if (tag) {
-      whereClause.tags = Link.sequelize.where(Link.sequelize.col('tags'), 'LIKE', `%${tag}%`);
+    // 🏷️ กรองแท็กได้สูงสุด 2 แท็ก แบบ OR: (tags LIKE %tag% OR tags LIKE %tag2%)
+    const tagsCol = Link.sequelize.col('tags');
+    const tagConditions = [];
+    if (tag)  tagConditions.push(Link.sequelize.where(tagsCol, 'LIKE', `%${tag}%`));
+    if (tag2) tagConditions.push(Link.sequelize.where(tagsCol, 'LIKE', `%${tag2}%`));
+    if (tagConditions.length) {
+      whereClause[Op.and] = [
+        ...(whereClause[Op.and] || []),
+        { [Op.or]: tagConditions }
+      ];
     }
 
     const { count, rows } = await Link.findAndCountAll({
