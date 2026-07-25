@@ -63,7 +63,9 @@ app.use('/api/admin', require('./routes/admin'));
 const BOT_USER_AGENTS = [
   'bot', 'spider', 'crawler', 'preview', 'facebookexternalhit', 'line', 'twitterbot',
   'telegrambot', 'whatsapp', 'googlebot', 'bingbot', 'yandexbot',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  // 🧰 HTTP library / headless / scraper ที่บอทชอบใช้ (แม้จะปลอม 'mozilla' บางตัวก็ยังโดนจับ เช่น headlesschrome)
+  'headlesschrome', 'phantomjs', 'scrapy', 'python', 'curl/', 'wget', 'okhttp',
+  'go-http-client', 'axios', 'node-fetch', 'java/', 'libwww', 'httpclient'
 ];
 
 // ตัวแปรจำ IP และจำนวนคลิกในหน่วยความจำชั่วคราว
@@ -110,9 +112,15 @@ app.get('/:alias', async (req, res) => {
     // ==========================================
     const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'Unknown';
     const ua = (req.get('user-agent') || '').toLowerCase();
+    const acceptLang = req.get('accept-language') || '';
 
-    // ด่านที่ 1: ตรวจจับ Bot ของ Social Media และ Bot สายตรวจ
-    const isBot = BOT_USER_AGENTS.some(b => ua.includes(b));
+    // ด่านที่ 1: ตรวจจับ Bot/Crawler และ HTTP library จากรายชื่อ User-Agent
+    const inBotList = BOT_USER_AGENTS.some(b => ua.includes(b));
+    // ด่านที่ 2: เบราว์เซอร์จริงทุกตัวมีคำว่า 'mozilla' ใน UA — ถ้าไม่มี = ไม่ใช่คนกดจากเบราว์เซอร์
+    const notBrowser = !ua.includes('mozilla');
+    // ด่านที่ 3: เบราว์เซอร์จริงส่ง header accept-language เสมอ — บอทส่วนใหญ่ไม่ส่ง
+    const noAcceptLang = acceptLang === '';
+    const isBot = inBotList || notBrowser || noAcceptLang;
     
     // ด่านที่ 2: ตรวจจับการกดสแปมคลิก (เกิน 30 ครั้ง ภายใน 1 นาที)
     let isSpam = false;
@@ -132,7 +140,7 @@ app.get('/:alias', async (req, res) => {
 
     // 🥷 ทำงานแบบแบนเงียบ (Silent Pass)
     if (isBot || isSpam) {
-      console.log(`🛡️ [Anti-Bot] ดักจับผู้ต้องสงสัย IP: ${clientIp} | Bot: ${isBot} | Spam: ${isSpam} (ส่งผ่านแต่ไม่บันทึกสถิติ)`);
+      console.log(`🛡️ [Anti-Bot] ดักจับผู้ต้องสงสัย IP: ${clientIp} | Bot: ${isBot} (list:${inBotList} noBrowser:${notBrowser} noLang:${noAcceptLang}) | Spam: ${isSpam} | UA: ${ua.slice(0, 80)} (ส่งผ่านแต่ไม่บันทึกสถิติ)`);
       return res.redirect(finalUrl); 
     }
 
