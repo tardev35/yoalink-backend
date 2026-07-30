@@ -8,6 +8,7 @@ const AuditLog = require('../models/AuditLog'); // 🔥 นำเข้าระ
 const auth = require('../middleware/auth');
 const router = express.Router();
 const createAuditLog = require('../utils/logger');
+const { isLineLink } = require('../utils/lineLink'); // 🟢 ตรวจลิงก์ปลายทาง LINE
 // 📋 1. GET: ดึงรายการลิงก์ย่อทั้งหมด (อัปเกรดส่งตัวนับจำนวนลิงก์ทั้งหมด)
 router.get('/', auth, async (req, res) => {
   try {
@@ -188,6 +189,70 @@ router.delete('/:id', auth, async (req, res) => {
     res.json({ message: 'ลบลิงก์สำเร็จ' });
   } catch (error) {
     res.status(500).json({ message: 'Error deleting link' });
+  }
+});
+
+// 🔗 3.6 PUT: แก้ไข URL ปลายทางเต็ม — เฉพาะลิงก์ปลายทาง LINE และเฉพาะ admin
+router.put('/:id', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'เฉพาะแอดมินเท่านั้นที่แก้ไข URL ลิงก์ได้' });
+    }
+
+    let { originalUrl } = req.body;
+    if (!originalUrl) {
+      return res.status(400).json({ message: 'กรุณากรอก URL ปลายทาง' });
+    }
+
+    const link = await Link.findByPk(req.params.id);
+    if (!link) {
+      return res.status(404).json({ message: 'ไม่พบลิงก์ที่ต้องการแก้ไข' });
+    }
+
+    // ✅ อนุญาตแก้ URL เต็มเฉพาะลิงก์ที่ปลายทางเดิมเป็น LINE เท่านั้น (ลิงก์อื่นแก้ผ่าน rotate โดเมน)
+    if (!isLineLink(link.originalUrl)) {
+      return res.status(403).json({ message: 'แก้ URL เต็มได้เฉพาะลิงก์ปลายทาง LINE เท่านั้น' });
+    }
+
+    // normalize + validate URL ใหม่ (แนวเดียวกับตอนสร้างลิงก์)
+    if (!originalUrl.startsWith('http://') && !originalUrl.startsWith('https://')) {
+      originalUrl = 'https://' + originalUrl;
+    }
+    try {
+      new URL(originalUrl);
+    } catch (e) {
+      return res.status(400).json({ message: 'รูปแบบ URL ไม่ถูกต้อง' });
+    }
+
+    // 🟢 บังคับว่า URL ใหม่ต้องเป็นโดเมน LINE ด้วย (คงสถานะ line link ไว้ ไม่หลุด rotation)
+    if (!isLineLink(originalUrl)) {
+      return res.status(400).json({ message: 'URL ใหม่ต้องเป็นลิงก์ LINE (line.me / lin.ee) เท่านั้น' });
+    }
+
+    // อัปเดต Domain ให้ตรงกับ hostname ใหม่ (findOrCreate เหมือนตอนสร้าง)
+    const domainName = new URL(originalUrl).hostname;
+    let domain = await Domain.findOne({ where: { name: domainName } });
+    if (!domain) {
+      domain = await Domain.create({ name: domainName, createdBy: req.user.id });
+    }
+
+    const oldUrl = link.originalUrl;
+    link.originalUrl = originalUrl;
+    link.domainId = domain.id;
+    await link.save();
+
+    await createAuditLog(req, 'EDIT_LINK_URL', { alias: link.alias, fromUrl: oldUrl, toUrl: originalUrl });
+
+    const updated = await Link.findByPk(link.id, {
+      include: [
+        { model: Domain, attributes: ['name'] },
+        { model: User, attributes: ['username'] }
+      ]
+    });
+    res.json({ message: 'แก้ไข URL ลิงก์สำเร็จ', link: updated });
+  } catch (error) {
+    console.error('Edit Link URL Error:', error);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดในการแก้ไข URL ลิงก์' });
   }
 });
 

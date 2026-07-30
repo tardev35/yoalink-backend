@@ -5,6 +5,7 @@ const Domain = require('../models/Domain');
 const Link = require('../models/Link');
 const AuditLog = require('../models/AuditLog'); 
 const createAuditLog = require('../utils/logger'); // 🔥 เรียกใช้ฟังก์ชันสายลับดัก IP
+const { isLineLink } = require('../utils/lineLink'); // 🟢 ตรวจลิงก์ปลายทาง LINE (ยกเว้นตอน rotate โดเมน)
 const auth = require('../middleware/auth');
 const router = express.Router();
 
@@ -125,6 +126,7 @@ router.delete('/domains/:id', [auth, isAdmin], async (req, res) => {
 async function updateLinksInBackground(domainId, newDomainName) {
   const links = await Link.findAll({ where: { domainId: domainId } });
   for (let link of links) {
+    if (isLineLink(link.originalUrl)) continue; // 🟢 ยกเว้นลิงก์ปลายทาง LINE — ไม่ swap hostname ตอน rotate
     if (link.originalUrl) {
       try {
         const urlObj = new URL(link.originalUrl); urlObj.hostname = newDomainName; 
