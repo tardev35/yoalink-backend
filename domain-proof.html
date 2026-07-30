@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>🔎 Domain Proof — Yoalink</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0B101B; color: #C9CED6; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; padding: 20px; }
+  h1 { font-size: 20px; color: #fff; margin-bottom: 4px; }
+  .sub { color: #6b7280; font-size: 13px; margin-bottom: 16px; }
+  .cards { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+  .card { background: #181E29; border: 1px solid #263041; border-radius: 12px; padding: 12px 18px; min-width: 130px; }
+  .card .n { font-size: 26px; font-weight: 800; }
+  .card .l { font-size: 12px; color: #9ca3af; }
+  .green { color: #34d399; } .red { color: #f87171; } .blue { color: #61DAFB; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:14px; }
+  .bar button, .bar input { background:#181E29; border:1px solid #263041; color:#C9CED6; border-radius:8px; padding:8px 12px; font-size:13px; cursor:pointer; }
+  .bar button.active { background:#144EE3; border-color:#144EE3; color:#fff; font-weight:700; }
+  .bar input { cursor:text; min-width:220px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #1c2431; vertical-align: top; }
+  th { color: #9ca3af; font-weight: 700; position: sticky; top: 0; background: #0B101B; }
+  tr:hover { background: #131a26; }
+  .tag { display:inline-block; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:700; }
+  .t-counted { background: rgba(52,211,153,.15); color:#34d399; }
+  .t-blocked { background: rgba(248,113,113,.15); color:#f87171; }
+  .mono { font-family: ui-monospace, "Cascadia Code", monospace; }
+  .dim { color:#6b7280; }
+  .ua { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ref { color:#fbbf24; font-weight:600; }
+  .wrapscroll { overflow-x:auto; border:1px solid #1c2431; border-radius:12px; }
+  .note { font-size:12px; color:#6b7280; margin-top:10px; line-height:1.6; }
+</style>
+</head>
+<body>
+  <h1>🔎 Domain Proof — หลักฐาน Referer รายคลิก</h1>
+  <div class="sub">รีเฟรชอัตโนมัติทุก 15 วิ · <span id="updated">—</span></div>
+
+  <div class="cards">
+    <div class="card"><div class="n blue" id="c-total">0</div><div class="l">ทั้งหมด (ในไฟล์)</div></div>
+    <div class="card"><div class="n green" id="c-counted">0</div><div class="l">✅ ถูกนับ (ผ่านด่าน)</div></div>
+    <div class="card"><div class="n red" id="c-blocked">0</div><div class="l">🛡️ ถูกบล็อก (บอท/สแปม)</div></div>
+    <div class="card"><div class="n" id="c-real">0</div><div class="l">🟦 ของจริง (facebook/google/tiktok)</div></div>
+  </div>
+
+  <div class="bar">
+    <button data-f="all" class="active">ทั้งหมด</button>
+    <button data-f="counted">✅ เฉพาะถูกนับ</button>
+    <button data-f="blocked">🛡️ เฉพาะบล็อก</button>
+    <input id="q" placeholder="🔍 กรอง: โดเมน / IP / alias / UA..." />
+  </div>
+
+  <div class="wrapscroll">
+    <table>
+      <thead>
+        <tr>
+          <th>เวลา</th><th>alias</th><th>สถานะ</th><th>โดเมน (ref)</th><th>Referer ดิบ</th><th>IP</th><th>User-Agent</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    วิธีอ่าน: แถว <b>✅ ถูกนับ</b> ที่ "โดเมน (ref)" เป็นเว็บแปลกๆ ให้ดู <b>IP</b> + <b>User-Agent</b> —
+    ถ้า IP เป็น datacenter ต่างประเทศ / UA แปลกๆ = บอทปลอม referer (ไม่ใช่คนกดจริง)<br>
+    หน้านี้เป็นของชั่วคราวสำหรับตรวจสอบ ~2 วัน แล้วจะถอดออก
+  </div>
+
+<script>
+  const KEY = new URLSearchParams(location.search).get('key') || '';
+  const REAL = ['facebook.com','instagram.com','google','tiktok','line.me','lin.ee','t.co','youtube'];
+  let data = [], filter = 'all';
+
+  const esc = s => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const isReal = d => d && REAL.some(r => d.includes(r));
+
+  function render() {
+    const q = document.getElementById('q').value.trim().toLowerCase();
+    document.getElementById('c-total').textContent = data.length;
+    document.getElementById('c-counted').textContent = data.filter(e => e.status === 'counted').length;
+    document.getElementById('c-blocked').textContent = data.filter(e => e.status === 'blocked').length;
+    document.getElementById('c-real').textContent = data.filter(e => e.status === 'counted' && isReal(e.ref)).length;
+
+    let rows = data;
+    if (filter !== 'all') rows = rows.filter(e => e.status === filter);
+    if (q) rows = rows.filter(e => JSON.stringify(e).toLowerCase().includes(q));
+
+    document.getElementById('rows').innerHTML = rows.slice(0, 1000).map(e => {
+      const time = (e.t || '').replace('T', ' ').slice(5, 19);
+      const status = e.status === 'counted'
+        ? '<span class="tag t-counted">✅ นับ</span>'
+        : '<span class="tag t-blocked">🛡️ ' + esc(e.reason || 'block') + '</span>';
+      const ref = e.ref ? '<span class="ref">' + esc(e.ref) + '</span>' : '<span class="dim">—</span>';
+      return '<tr>'
+        + '<td class="mono dim">' + esc(time) + '</td>'
+        + '<td class="mono">' + esc(e.alias) + '</td>'
+        + '<td>' + status + '</td>'
+        + '<td>' + ref + '</td>'
+        + '<td class="mono dim">' + (esc(e.rawRef) || '—') + '</td>'
+        + '<td class="mono">' + esc(e.ip) + '</td>'
+        + '<td class="ua mono dim" title="' + esc(e.ua) + '">' + esc(e.ua) + '</td>'
+        + '</tr>';
+    }).join('') || '<tr><td colspan="7" class="dim" style="text-align:center;padding:30px">— ยังไม่มีข้อมูล —</td></tr>';
+  }
+
+  async function load() {
+    try {
+      const res = await fetch('/api/domain-proof-data?key=' + encodeURIComponent(KEY));
+      if (!res.ok) { document.getElementById('updated').textContent = 'เข้าถึงไม่ได้ (key ผิด?)'; return; }
+      const j = await res.json();
+      data = j.entries || [];
+      document.getElementById('updated').textContent = 'อัปเดตล่าสุด ' + new Date().toLocaleTimeString('th-TH');
+      render();
+    } catch (e) { document.getElementById('updated').textContent = 'โหลดข้อมูลไม่สำเร็จ'; }
+  }
+
+  document.querySelectorAll('.bar button').forEach(b => b.onclick = () => {
+    document.querySelectorAll('.bar button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active'); filter = b.dataset.f; render();
+  });
+  document.getElementById('q').oninput = render;
+
+  load();
+  setInterval(load, 15000);
+</script>
+</body>
+</html>

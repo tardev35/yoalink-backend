@@ -5,6 +5,19 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const sequelize = require('./db');
+const fs = require('fs');
+const path = require('path');
+
+// ==========================================
+// 🔎 [ชั่วคราว] Domain Proof Log — เก็บ Referer ดิบ + IP + UA ทุกคลิก เพื่อพิสูจน์บอท (ถอดออกได้ทั้งบล็อก)
+// ==========================================
+const PROOF_KEY = 'yoaproof-7x9k2m';                        // กุญแจเปิดหน้า domain-proof
+const PROOF_LOG = path.join(__dirname, 'domain-proof.log'); // ไฟล์ log (อยู่ใน .gitignore ไม่ขึ้น git)
+function recordProof(entry) {
+  fs.appendFile(PROOF_LOG, JSON.stringify(entry) + '\n', (err) => {
+    if (err) console.error('Proof log write error:', err.message);
+  });
+}
 
 // 📦 นำเข้าตารางฐานข้อมูลทั้งหมด
 const User = require('./models/User');
@@ -79,6 +92,24 @@ setInterval(() => {
   }
 }, 60000);
 
+// 🔎 [ชั่วคราว] หน้าดูหลักฐาน Domain Proof (เปิดผ่าน /api ให้ nginx proxy ไป backend แน่นอน) — ถอดออกเมื่อเทสเสร็จ
+app.get('/api/domain-proof.html', (req, res) => {
+  if (req.query.key !== PROOF_KEY) return res.status(403).send('Forbidden');
+  res.sendFile(path.join(__dirname, 'domain-proof.html'));
+});
+app.get('/api/domain-proof-data', (req, res) => {
+  if (req.query.key !== PROOF_KEY) return res.status(403).json({ error: 'forbidden' });
+  let entries = [];
+  try {
+    const raw = fs.readFileSync(PROOF_LOG, 'utf8');
+    entries = raw.trim().split('\n').filter(Boolean).slice(-3000)
+      .map(l => { try { return JSON.parse(l); } catch (e) { return null; } })
+      .filter(Boolean)
+      .reverse();
+  } catch (e) { /* ยังไม่มีไฟล์ = ยังไม่มีคลิกถูกบันทึก */ }
+  res.json({ count: entries.length, entries });
+});
+
 // 🚀 ระบบ Redirect ลิงก์ย่อ พร้อมรวบรวมข้อมูล 5 โมดูล
 app.get('/:alias', async (req, res) => {
   try {
@@ -141,7 +172,8 @@ app.get('/:alias', async (req, res) => {
     // 🥷 ทำงานแบบแบนเงียบ (Silent Pass)
     if (isBot || isSpam) {
       console.log(`🛡️ [Anti-Bot] ดักจับผู้ต้องสงสัย IP: ${clientIp} | Bot: ${isBot} (list:${inBotList} noBrowser:${notBrowser} noLang:${noAcceptLang}) | Spam: ${isSpam} | UA: ${ua.slice(0, 80)} (ส่งผ่านแต่ไม่บันทึกสถิติ)`);
-      return res.redirect(finalUrl); 
+      recordProof({ t: new Date().toISOString(), alias: link.alias, status: 'blocked', reason: isSpam ? 'spam' : (inBotList ? 'botlist' : notBrowser ? 'noBrowser' : 'noLang'), ref: '', rawRef: req.get('Referer') || req.get('Referrer') || '', ip: clientIp, ua: req.get('user-agent') || '' });
+      return res.redirect(finalUrl);
     }
 
     // ==========================================
@@ -176,6 +208,9 @@ app.get('/:alias', async (req, res) => {
         detectedReferrer = 'Unknown Domain'; 
       }
     }
+
+    // 🔎 [ชั่วคราว] เก็บหลักฐานคลิกที่ถูกนับ (Referer ดิบ + IP + UA)
+    recordProof({ t: new Date().toISOString(), alias: link.alias, status: 'counted', reason: '', ref: detectedReferrer, rawRef: refererHeader, ip: clientIp, ua: req.get('user-agent') || '' });
 
     // 📝 บันทึก log รายคลิก (มี timestamp) พร้อม referrer เพื่อใช้กรองตามช่วงเวลา
     await LinkClickLog.create({ linkId: link.id, channel: targetChannel, referrerDomain: detectedReferrer });

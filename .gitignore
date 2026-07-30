@@ -11,3 +11,6 @@ database.sqlite
 .DS_Store
 Thumbs.db
 dist/
+
+# [ชั่วคราว] Domain Proof log — มี IP ห้ามขึ้น git
+domain-proof.log
