@@ -95,6 +95,8 @@ setInterval(() => {
 // 🔎 [ชั่วคราว] หน้าดูหลักฐาน Domain Proof (เปิดผ่าน /api ให้ nginx proxy ไป backend แน่นอน) — ถอดออกเมื่อเทสเสร็จ
 app.get('/api/domain-proof.html', (req, res) => {
   if (req.query.key !== PROOF_KEY) return res.status(403).send('Forbidden');
+  // ผ่อน CSP เฉพาะหน้านี้ ให้ inline <script> รันได้ (helmet default บล็อก inline script)
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'");
   res.sendFile(path.join(__dirname, 'domain-proof.html'));
 });
 app.get('/api/domain-proof-data', (req, res) => {
