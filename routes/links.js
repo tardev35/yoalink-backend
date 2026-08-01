@@ -8,7 +8,6 @@ const AuditLog = require('../models/AuditLog'); // 🔥 นำเข้าระ
 const auth = require('../middleware/auth');
 const router = express.Router();
 const createAuditLog = require('../utils/logger');
-const { isLineLink } = require('../utils/lineLink'); // 🟢 ตรวจลิงก์ปลายทาง LINE
 // 📋 1. GET: ดึงรายการลิงก์ย่อทั้งหมด (อัปเกรดส่งตัวนับจำนวนลิงก์ทั้งหมด)
 router.get('/', auth, async (req, res) => {
   try {
@@ -192,7 +191,7 @@ router.delete('/:id', auth, async (req, res) => {
   }
 });
 
-// 🔗 3.6 PUT: แก้ไข URL ปลายทางเต็ม — เฉพาะลิงก์ปลายทาง LINE และเฉพาะ admin
+// 🔗 3.6 PUT: แก้ไข URL ปลายทางเต็ม (ทุกลิงก์ / ทุกโดเมน) — เฉพาะ admin
 router.put('/:id', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
@@ -209,11 +208,6 @@ router.put('/:id', auth, async (req, res) => {
       return res.status(404).json({ message: 'ไม่พบลิงก์ที่ต้องการแก้ไข' });
     }
 
-    // ✅ อนุญาตแก้ URL เต็มเฉพาะลิงก์ที่ปลายทางเดิมเป็น LINE เท่านั้น (ลิงก์อื่นแก้ผ่าน rotate โดเมน)
-    if (!isLineLink(link.originalUrl)) {
-      return res.status(403).json({ message: 'แก้ URL เต็มได้เฉพาะลิงก์ปลายทาง LINE เท่านั้น' });
-    }
-
     // normalize + validate URL ใหม่ (แนวเดียวกับตอนสร้างลิงก์)
     if (!originalUrl.startsWith('http://') && !originalUrl.startsWith('https://')) {
       originalUrl = 'https://' + originalUrl;
@@ -222,11 +216,6 @@ router.put('/:id', auth, async (req, res) => {
       new URL(originalUrl);
     } catch (e) {
       return res.status(400).json({ message: 'รูปแบบ URL ไม่ถูกต้อง' });
-    }
-
-    // 🟢 บังคับว่า URL ใหม่ต้องเป็นโดเมน LINE ด้วย (คงสถานะ line link ไว้ ไม่หลุด rotation)
-    if (!isLineLink(originalUrl)) {
-      return res.status(400).json({ message: 'URL ใหม่ต้องเป็นลิงก์ LINE (line.me / lin.ee) เท่านั้น' });
     }
 
     // อัปเดต Domain ให้ตรงกับ hostname ใหม่ (findOrCreate เหมือนตอนสร้าง)
