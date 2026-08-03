@@ -6,7 +6,15 @@ const Link = require('./models/Link');
 // 🔥 ฝัง Token ตรงๆ ไปเลย จบทุกปัญหา .env เอ๋อ! (แอบใส่ .trim() ไว้กันเหนียวให้ด้วย)
 const TELEGRAM_TOKEN = '8534286548:AAGDg5zML-FjirlbYryUKMYOa6DRG538Qh8'.trim();
 const CHAT_ID = '-5415283024'.trim();
-const MAIN_DOMAIN = 'https://yoalink.com'; 
+const MAIN_DOMAIN = 'https://yoalink.com';
+
+// header ที่ใช้ยิงเช็ก + X-Monitor-Key บอก backend ว่าเป็น monitor (ไม่ต้องเขียนสถิติ)
+const REQUEST_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  'Accept-Language': 'th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7',
+  'X-Monitor-Key': 'yoalink-monitor-2f8k'
+};
 
 console.log(`📡 โหลด Token สำเร็จ! (ความยาว: ${TELEGRAM_TOKEN.length} ตัวอักษร)`);
 
@@ -24,6 +32,24 @@ async function sendTelegram(msg) {
 }
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// 🔁 เช็กลิงก์แบบมี retry: timeout ครั้งเดียวไม่ตัดสินว่าพัง (กัน false alarm จากโหลดชั่วคราว)
+// ถือว่า "ปกติ" เมื่อได้ redirect 3xx · ลองซ้ำสูงสุด 3 ครั้ง เว้น 2 วิ ก่อนสรุปว่าพัง
+async function checkLink(targetUrl, attempts = 3) {
+  let lastStatus;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      await axios.get(targetUrl, { maxRedirects: 0, timeout: 8000, headers: REQUEST_HEADERS });
+      return { ok: true }; // ได้ 2xx (พบยากกับ redirect) ก็ถือว่าปกติ
+    } catch (err) {
+      const status = err.response?.status;
+      if (status >= 300 && status < 400) return { ok: true }; // redirect = ปกติ
+      lastStatus = status; // undefined = timeout / ไม่มี response
+      if (i < attempts) await sleep(2000); // รอ 2 วิ แล้วลองใหม่
+    }
+  }
+  return { ok: false, status: lastStatus };
+}
 
 async function startMonitoring() {
   console.log('🚀 เริ่มต้นระบบ Automation ตรวจสอบลิงก์ย่อ...');
@@ -53,26 +79,12 @@ async function startMonitoring() {
 
     for (let link of links) {
       const targetUrl = `${MAIN_DOMAIN}/${link.alias}`;
-      try {
-        await axios.get(targetUrl, { 
-          maxRedirects: 0, 
-          timeout: 5000,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-            'Accept-Language': 'th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7'
-          }
-        });
-      } catch (linkError) {
-        const responseStatus = linkError.response?.status;
-        if (responseStatus && responseStatus >= 300 && responseStatus < 400) {
-          // ปล่อยผ่าน
-        } else {
-          console.log(`❌ ลิงก์พัง: ${targetUrl} (Status: ${responseStatus || 'Timeout'})`);
-          brokenLinks.push(`- ${link.alias} (Status: ${responseStatus || 'ดับ/Timeout'})`);
-        }
+      const result = await checkLink(targetUrl);
+      if (!result.ok) {
+        console.log(`❌ ลิงก์พัง: ${targetUrl} (Status: ${result.status || 'Timeout'})`);
+        brokenLinks.push(`- ${link.alias} (Status: ${result.status || 'ดับ/Timeout'})`);
       }
-      await sleep(500); 
+      await sleep(500);
     }
 
     if (brokenLinks.length > 0) {

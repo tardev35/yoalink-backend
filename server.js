@@ -12,6 +12,7 @@ const path = require('path');
 // 🔎 [ชั่วคราว] Domain Proof Log — เก็บ Referer ดิบ + IP + UA ทุกคลิก เพื่อพิสูจน์บอท (ถอดออกได้ทั้งบล็อก)
 // ==========================================
 const PROOF_KEY = 'yoaproof-7x9k2m';                        // กุญแจเปิดหน้า domain-proof
+const MONITOR_KEY = 'yoalink-monitor-2f8k';                 // กุญแจให้ monitor.js เช็กลิงก์โดยไม่เขียนสถิติ (กันสถิติเฟ้อ + ลดโหลด DB)
 const PROOF_LOG = path.join(__dirname, 'domain-proof.log'); // ไฟล์ log (อยู่ใน .gitignore ไม่ขึ้น git)
 function recordProof(entry) {
   fs.appendFile(PROOF_LOG, JSON.stringify(entry) + '\n', (err) => {
@@ -138,6 +139,11 @@ app.get('/:alias', async (req, res) => {
     if (targetChannel !== 'organic/direct') {
       const joinChar = finalUrl.includes('?') ? '&' : '?';
       finalUrl = `${finalUrl}${joinChar}s=${forwardParam}`;
+    }
+
+    // 🩺 ตัวมอนิเตอร์ (monitor.js) — ตอบ redirect ทันที ไม่เขียนสถิติ/log (กันสถิติเฟ้อ + ลดโหลด DB ตอนเช็ก 328 ลิงก์)
+    if (req.get('X-Monitor-Key') === MONITOR_KEY) {
+      return res.redirect(finalUrl);
     }
 
     // ==========================================
