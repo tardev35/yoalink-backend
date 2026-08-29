@@ -116,6 +116,26 @@ app.get('/api/domain-proof-data', (req, res) => {
 // 🚀 ระบบ Redirect ลิงก์ย่อ พร้อมรวบรวมข้อมูล 5 โมดูล
 app.get('/:alias', async (req, res) => {
   try {
+    // 🚫 ห้าม Google เก็บตัว "ลิงก์ย่อ" เข้าดัชนี
+    //
+    // ต้องตั้งก่อนทุกทางออกของ handler นี้ (redirect 3 จุด + 404 + 500) เพราะ Google
+    // อ่าน X-Robots-Tag จาก header ของผลตอบ 3xx ด้วย ไม่ใช่แค่จากหน้า HTML
+    //
+    // ที่ต้องมี: res.redirect() ของ Express ตอบ 302 ซึ่ง Google ถือว่าเป็นการย้ายชั่วคราว
+    // จึงเก็บ "URL ต้นทาง" ไว้ในดัชนีแล้วเอาชื่อเรื่องของปลายทางมาแสดง ผลคือค้น
+    // site:yoalink.com แล้วเจอลิงก์พนันเต็มไปหมด ทั้งที่โดเมนนี้เป็นโดเมนเดียวกับ
+    // gsc.yoalink.com และ audit.yoalink.com — ถ้าโดนตีว่าเป็นฟาร์ม redirect
+    // subdomain เครื่องมือภายในโดนหางเลขด้วยทั้งหมด
+    //
+    // ⚠️ ห้ามแก้เป็น res.redirect(301, ...) เพื่อหวังให้ Google ยุบ URL ทิ้ง —
+    // เบราว์เซอร์แคช 301 ไว้ถาวร คนที่เคยกดลิงก์นี้แล้วจะถูกพาไปปลายทาง "เดิม"
+    // ตลอดไป แม้ทีมจะแก้ปลายทางใหม่ผ่านหน้าจัดการลิงก์ (PUT /api/links/:id) แล้วก็ตาม
+    // 302 + noindex แก้ปัญหาดัชนีได้โดยที่ยังเปลี่ยนปลายทางได้เหมือนเดิม
+    //
+    // ⚠️ ห้ามไปใส่ Disallow ใน robots.txt แทน — บล็อกแล้ว Googlebot จะเข้ามาอ่าน
+    // header นี้ไม่ได้ URL เก่าก็ค้างในดัชนีต่อไปแบบไม่มีเนื้อหา แย่กว่าเดิม
+    res.set('X-Robots-Tag', 'noindex, nofollow');
+
     const { alias } = req.params;
     const link = await Link.findOne({ where: { alias: alias.toLowerCase() } });
     
