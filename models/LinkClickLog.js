@@ -18,7 +18,9 @@ const LinkClickLog = sequelize.define('LinkClickLog', {
 }, {
   // 🔥 หัวใจสำคัญอยู่ตรงนี้ครับ: สั่งระบบว่าเอาแค่ createdAt ไม่ต้องพยายามหา updatedAt
   timestamps: true,
-  updatedAt: false
+  updatedAt: false,
+  // ⚡ index ให้ query สถิติรายลิงก์ไม่ต้องสแกนทั้งตาราง (sync() จะสร้างให้อัตโนมัติถ้ายังไม่มี)
+  indexes: [{ fields: ['linkId', 'createdAt'] }]
 });
 
 module.exports = LinkClickLog;

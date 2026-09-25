@@ -333,49 +333,36 @@ router.get('/:id/time-stats', auth, async (req, res) => {
       }
     }
 
-    const clickLogs = await LinkClickLog.findAll({ where: { linkId: req.params.id }, attributes: ['createdAt'], raw: true });
-    
-    // สร้างตารางชั่วโมง 00:00 - 23:00
-    const hourlyGrid = {};
-    for (let i = 0; i < 24; i++) { 
-      hourlyGrid[String(i).padStart(2, '0')] = 0; 
-    }
+    // ⚡ ให้ SQLite นับ (GROUP BY) แทนการดึงทุกคลิกมาวนลูปใน Node — เวลาไทย = UTC +7 (ไม่มี DST)
+    const table = LinkClickLog.getTableName();
+    const [hourRows] = await LinkClickLog.sequelize.query(
+      `SELECT strftime('%H', createdAt, '+7 hours') AS h, COUNT(*) AS clicks FROM ${table} WHERE linkId = :id GROUP BY h`,
+      { replacements: { id: req.params.id } }
+    );
 
-    // สร้างตารางรายวันล่วงหน้า 7 วัน
-    const dailyGrid = {};
+    // สร้างตารางรายวันย้อนหลัง 7 วัน (key = YYYY-MM-DD ตามเวลาไทย)
+    const BKK_OFFSET_MS = 7 * 3600e3;
+    const dayKeys = [];
     for (let i = 6; i >= 0; i--) {
-      const d = new Date(); 
-      // 🔥 จุดแก้ที่ 1: บังคับให้การนับวันอิงตาม Timezone ประเทศไทย (Asia/Bangkok)
-      const tzTime = new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Bangkok' }));
-      tzTime.setDate(tzTime.getDate() - i);
-      const dateStr = tzTime.toLocaleDateString('th-TH', { day: '2-digit', month: 'short' });
-      dailyGrid[dateStr] = 0;
+      dayKeys.push(new Date(Date.now() + BKK_OFFSET_MS - i * 24 * 3600e3).toISOString().slice(0, 10));
+    }
+    const [dayRows] = await LinkClickLog.sequelize.query(
+      `SELECT date(createdAt, '+7 hours') AS d, COUNT(*) AS clicks FROM ${table} WHERE linkId = :id AND date(createdAt, '+7 hours') >= :firstDay GROUP BY d`,
+      { replacements: { id: req.params.id, firstDay: dayKeys[0] } }
+    );
+
+    const hourMap = Object.fromEntries(hourRows.map(r => [r.h, r.clicks]));
+    const hourlyData = [];
+    for (let i = 0; i < 24; i++) {
+      const h = String(i).padStart(2, '0');
+      hourlyData.push({ hour: `${h}:00`, clicks: hourMap[h] || 0 });
     }
 
-    clickLogs.forEach(log => {
-      const originalDate = new Date(log.createdAt);
-      
-      // 🔥 จุดแก้ที่ 2: แปลงเวลา Database (UTC) ให้เป็นเวลาไทย (+7) ก่อนดึงชั่วโมง
-      const tzDateObj = new Date(originalDate.toLocaleString('en-US', { timeZone: 'Asia/Bangkok' }));
-      
-      const hourStr = String(tzDateObj.getHours()).padStart(2, '0');
-      if (hourlyGrid[hourStr] !== undefined) {
-        hourlyGrid[hourStr] += 1;
-      }
-
-      const dateStr = tzDateObj.toLocaleDateString('th-TH', { day: '2-digit', month: 'short' });
-      if (dailyGrid[dateStr] !== undefined) {
-        dailyGrid[dateStr] += 1;
-      }
-    });
-
-    const hourlyData = Object.keys(hourlyGrid).map(h => {
-      return { hour: `${h}:00`, clicks: hourlyGrid[h] };
-    });
-    
-    const dailyData = Object.keys(dailyGrid).map(d => {
-      return { date: d, clicks: dailyGrid[d] };
-    });
+    const dayMap = Object.fromEntries(dayRows.map(r => [r.d, r.clicks]));
+    const dailyData = dayKeys.map(key => ({
+      date: new Date(`${key}T00:00:00Z`).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', timeZone: 'UTC' }),
+      clicks: dayMap[key] || 0
+    }));
 
     res.json({ hourly: hourlyData, daily: dailyData });
   } catch (error) {
