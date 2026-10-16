@@ -121,20 +121,24 @@ app.get('/:alias', async (req, res) => {
     // ต้องตั้งก่อนทุกทางออกของ handler นี้ (redirect 3 จุด + 404 + 500) เพราะ Google
     // อ่าน X-Robots-Tag จาก header ของผลตอบ 3xx ด้วย ไม่ใช่แค่จากหน้า HTML
     //
-    // ที่ต้องมี: res.redirect() ของ Express ตอบ 302 ซึ่ง Google ถือว่าเป็นการย้ายชั่วคราว
-    // จึงเก็บ "URL ต้นทาง" ไว้ในดัชนีแล้วเอาชื่อเรื่องของปลายทางมาแสดง ผลคือค้น
-    // site:yoalink.com แล้วเจอลิงก์พนันเต็มไปหมด ทั้งที่โดเมนนี้เป็นโดเมนเดียวกับ
-    // gsc.yoalink.com และ audit.yoalink.com — ถ้าโดนตีว่าเป็นฟาร์ม redirect
-    // subdomain เครื่องมือภายในโดนหางเลขด้วยทั้งหมด
-    //
-    // ⚠️ ห้ามแก้เป็น res.redirect(301, ...) เพื่อหวังให้ Google ยุบ URL ทิ้ง —
-    // เบราว์เซอร์แคช 301 ไว้ถาวร คนที่เคยกดลิงก์นี้แล้วจะถูกพาไปปลายทาง "เดิม"
-    // ตลอดไป แม้ทีมจะแก้ปลายทางใหม่ผ่านหน้าจัดการลิงก์ (PUT /api/links/:id) แล้วก็ตาม
-    // 302 + noindex แก้ปัญหาดัชนีได้โดยที่ยังเปลี่ยนปลายทางได้เหมือนเดิม
+    // ที่ต้องมี: เคยใช้ 302 ซึ่ง Google ถือว่าเป็นการย้ายชั่วคราว จึงเก็บ "URL ต้นทาง"
+    // ไว้ในดัชนีแล้วเอาชื่อเรื่องของปลายทางมาแสดง ผลคือค้น site:yoalink.com แล้วเจอ
+    // ลิงก์พนันเต็มไปหมด ทั้งที่โดเมนนี้เป็นโดเมนเดียวกับ gsc.yoalink.com และ
+    // audit.yoalink.com — ถ้าโดนตีว่าเป็นฟาร์ม redirect subdomain เครื่องมือภายในโดนหางเลขด้วยทั้งหมด
     //
     // ⚠️ ห้ามไปใส่ Disallow ใน robots.txt แทน — บล็อกแล้ว Googlebot จะเข้ามาอ่าน
     // header นี้ไม่ได้ URL เก่าก็ค้างในดัชนีต่อไปแบบไม่มีเนื้อหา แย่กว่าเดิม
     res.set('X-Robots-Tag', 'noindex, nofollow');
+
+    // 🔁 ตอบ 301 (ย้ายถาวร) ให้ Google ยุบ URL ลิงก์ย่อทิ้งแล้วนับเป็นปลายทางแทน
+    //
+    // ⚠️ 301 ต้องคู่กับ Cache-Control: no-store เสมอ ห้ามถอดออก —
+    // ปกติเบราว์เซอร์ (และ Cloudflare หน้าเรา) แคช 301 ไว้ถาวร คนที่เคยกดลิงก์แล้ว
+    // จะถูกพาไปปลายทาง "เดิม" ตลอดไปโดยไม่ผ่านเซิร์ฟเวอร์ แม้ทีมเปลี่ยนโดเมนปลายทาง
+    // ใหม่แล้ว (ซึ่งทำบ่อยมาก) และคลิกซ้ำพวกนั้นจะไม่ถูกนับสถิติด้วย
+    // no-store สั่งไม่ให้แคชทุกชั้น ⇒ ทุกคลิกยังวิ่งผ่านเซิร์ฟเวอร์ เปลี่ยนปลายทางได้ นับสถิติได้ครบ
+    // ต้องตั้งก่อนทุกทางออกเหมือน X-Robots-Tag (redirect 3 จุด + 404 + 500)
+    res.set('Cache-Control', 'no-store');
 
     const { alias } = req.params;
     const link = await Link.findOne({ where: { alias: alias.toLowerCase() } });
@@ -163,7 +167,7 @@ app.get('/:alias', async (req, res) => {
 
     // 🩺 ตัวมอนิเตอร์ (monitor.js) — ตอบ redirect ทันที ไม่เขียนสถิติ/log (กันสถิติเฟ้อ + ลดโหลด DB ตอนเช็ก 328 ลิงก์)
     if (req.get('X-Monitor-Key') === MONITOR_KEY) {
-      return res.redirect(finalUrl);
+      return res.redirect(301, finalUrl);
     }
 
     // ==========================================
@@ -201,7 +205,7 @@ app.get('/:alias', async (req, res) => {
     if (isBot || isSpam) {
       console.log(`🛡️ [Anti-Bot] ดักจับผู้ต้องสงสัย IP: ${clientIp} | Bot: ${isBot} (list:${inBotList} noBrowser:${notBrowser} noLang:${noAcceptLang}) | Spam: ${isSpam} | UA: ${ua.slice(0, 80)} (ส่งผ่านแต่ไม่บันทึกสถิติ)`);
       recordProof({ t: new Date().toISOString(), alias: link.alias, status: 'blocked', reason: isSpam ? 'spam' : (inBotList ? 'botlist' : notBrowser ? 'noBrowser' : 'noLang'), ref: '', rawRef: req.get('Referer') || req.get('Referrer') || '', ip: clientIp, ua: req.get('user-agent') || '' });
-      return res.redirect(finalUrl);
+      return res.redirect(301, finalUrl);
     }
 
     // ==========================================
@@ -252,7 +256,7 @@ app.get('/:alias', async (req, res) => {
     }
 
     // 🚀 ส่งลูกค้าจริงๆ ไปปลายทาง
-    res.redirect(finalUrl);
+    res.redirect(301, finalUrl);
 
   } catch (error) {
     console.error('Redirect Error:', error);

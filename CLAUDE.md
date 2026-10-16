@@ -76,6 +76,7 @@ c:\Dev\team-url-shortener\        ← โฟลเดอร์รวม (ไม�
 4. **แท็ก** เก็บเป็น JSON array และกรองด้วย `LIKE '%tag%'` บน string ที่ serialize → เป็น substring match (อาจ false positive) และ **case-sensitive**
 5. **ไฟล์ที่ห้ามขึ้น git** — `.env`, `node_modules/`, `database.sqlite` (มีใน `.gitignore` แล้ว อย่าเผลอ force add)
 6. **redirect + สถิติ อยู่ใน server.js** ไม่ใช่ใน routes/ — แก้ logic การนับคลิกที่นี่
+7. **redirect ตอบ 301 คู่กับ `Cache-Control: no-store` เสมอ** — ห้ามถอด no-store: ไม่งั้นเบราว์เซอร์/Cloudflare แคช 301 ถาวร เปลี่ยนโดเมนปลายทางแล้วลูกค้าเก่ายังไปที่เดิม และคลิกซ้ำไม่ถูกนับ
 
 ## Deploy (VPS: Ubuntu 22 + PM2 + nginx)
 - Path: `/var/www/yoalink/backend` และ `/var/www/yoalink/frontend`
