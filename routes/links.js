@@ -80,6 +80,62 @@ router.get('/tags', auth, async (req, res) => {
   }
 });
 
+// 🔎 ค้นหาหลายลิงก์ในครั้งเดียว (bulk) — วางได้ทั้ง "ลิงก์สั้น yoalink.com/alias", "alias" หรือ "URL ปลายทาง" ผสมกัน
+// ลิงก์สั้น/alias = จับคู่ตรงตัว (ไม่สนตัวพิมพ์) · URL ปลายทาง = จับแบบ "มีข้อความนี้" (จึงพิมพ์แค่โดเมนก็ได้)
+const BULK_MAX = 500;
+function parseBulkQuery(raw) {
+  const q = raw.trim();
+  const short = q.match(/^(?:https?:\/\/)?(?:www\.)?yoalink\.com\/([^/?#\s]+)/i);
+  if (short) return { type: 'alias', value: short[1].toLowerCase() };
+  if (/^https?:\/\//i.test(q) || q.includes('/') || q.includes('.')) return { type: 'url', value: q.replace(/\/+$/, '').toLowerCase() };
+  return { type: 'alias', value: q.toLowerCase() };
+}
+
+router.post('/bulk-search', auth, async (req, res) => {
+  try {
+    const lines = String(req.body?.text || '').split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+    const queries = [...new Set(lines)].slice(0, BULK_MAX).map(raw => ({ raw, ...parseBulkQuery(raw) }));
+    if (!queries.length) return res.status(400).json({ message: 'กรุณาวางลิงก์หรือ alias อย่างน้อย 1 บรรทัด' });
+
+    const aliases = queries.filter(q => q.type === 'alias').map(q => q.value);
+    const hasUrlTerms = queries.some(q => q.type === 'url');
+
+    // ⏱️ กัน timeout: ไม่สร้าง SQL ที่มี LIKE หลายร้อยเงื่อนไขต่อกัน (SQLite มีลิมิตความลึก expression)
+    // ถ้ามี URL ปลายทางให้ค้น → โหลดลิงก์ที่มีสิทธิ์เห็นทั้งหมดมาทีเดียว (ไม่กี่พันแถว) แล้วจับคู่ใน JS
+    // ถ้ามีแต่ alias → ใช้ IN ตรงๆ (alias ในระบบเก็บตัวพิมพ์เล็กเสมอ)
+    const where = hasUrlTerms ? {} : { alias: { [Op.in]: aliases } };
+    if (req.user.role !== 'admin') where.userId = req.user.id; // สิทธิ์เดียวกับหน้ารายการ
+
+    const links = await Link.findAll({
+      where,
+      include: [{ model: Domain, attributes: ['name'] }, { model: User, attributes: ['username'] }],
+      order: [['createdAt', 'DESC']]
+    });
+    const rows = links.map(l => ({
+      id: l.id, alias: l.alias, originalUrl: l.originalUrl, parameter: l.parameter || '', clicks: l.clicks || 0,
+      tags: Array.isArray(l.tags) ? l.tags : [], domain: l.Domain?.name || '', username: l.User?.username || ''
+    }));
+
+    // จับคู่ผลลัพธ์กลับไปแต่ละบรรทัดใน JS
+    const results = queries.map(q => ({
+      query: q.raw,
+      type: q.type,
+      matches: rows.filter(r => q.type === 'alias'
+        ? r.alias.toLowerCase() === q.value
+        : (r.originalUrl + r.parameter).toLowerCase().includes(q.value))
+    }));
+    res.json({
+      results,
+      found: results.filter(r => r.matches.length).length,
+      notFound: results.filter(r => !r.matches.length).length,
+      truncated: lines.length > BULK_MAX ? lines.length - BULK_MAX : 0
+    });
+  } catch (error) {
+    console.error('Bulk Search Error:', error);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดในการค้นหาหลายลิงก์' });
+  }
+});
+
 // 🚀 2. POST: สร้างลิงก์ย่อใหม่ + 🛡️ Audit Log
 router.post('/', auth, async (req, res) => {
   try {
