@@ -77,6 +77,8 @@ c:\Dev\team-url-shortener\        ← โฟลเดอร์รวม (ไม�
 5. **ไฟล์ที่ห้ามขึ้น git** — `.env`, `node_modules/`, `database.sqlite` (มีใน `.gitignore` แล้ว อย่าเผลอ force add)
 6. **redirect + สถิติ อยู่ใน server.js** ไม่ใช่ใน routes/ — แก้ logic การนับคลิกที่นี่
 7. **redirect ตอบ 301 คู่กับ `Cache-Control: no-store` เสมอ** — ห้ามถอด no-store: ไม่งั้นเบราว์เซอร์/Cloudflare แคช 301 ถาวร เปลี่ยนโดเมนปลายทางแล้วลูกค้าเก่ายังไปที่เดิม และคลิกซ้ำไม่ถูกนับ
+8. **กันบอท 5 ด่าน** (server.js): UA list / ไม่มี mozilla / ไม่มี accept-language / >30 คลิกต่อนาที / **blocklist + พฤติกรรม 24 ชม.** (UA เดสก์ท็อป referrer ≥15 โดเมน = Referer ปลอม, ≥25 alias = ฟาร์ม) — IPv6 นับเป็น /64 ด้วย [utils/ip.js](backend/utils/ip.js) · blocklist อยู่ตาราง `BlockedIps` จัดการผ่าน `/api/admin/blocked-ips` · บอทถูก redirect ปกติแต่ไม่นับสถิติ (status blocked + reason ใน `domain-proof.log`) · ล้างสถิติย้อนหลัง: [scripts/clean-bot-stats.js](backend/scripts/clean-bot-stats.js)
+9. **สถิติ "โดเมนต้นทาง" = หน้าที่กดลิงก์สั้น** ไม่ใช่เว็บที่ลิงก์ไปปลายทาง และยอด All Time รวมช่วงก่อนย้ายโดเมน — UI เริ่มที่ 30 วัน
 
 ## Deploy (VPS: Ubuntu 22 + PM2 + nginx)
 - Path: `/var/www/yoalink/backend` และ `/var/www/yoalink/frontend`

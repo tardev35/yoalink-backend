@@ -93,6 +93,65 @@ setInterval(() => {
   }
 }, 60000);
 
+// ==========================================
+// 🛡️ ด่านที่ 4-5 (เพิ่ม 2026-10-30): พฤติกรรม 24 ชม. + Blocklist
+// ที่มา: proof log 3 เดือนพบบอทที่ผ่านด่าน 1-3 ได้หมด (UA ปกติ, มี accept-language, ไม่เกิน 30 คลิก/นาที)
+//   - บอทใส่ Referer ปลอม: IP เดียว (UA เดสก์ท็อป จาก datacenter) สุ่ม Referer 20-119 โดเมน/วัน
+//     → สถิติ "โดเมนต้นทาง" โผล่โดเมนที่ไม่เคยติดลิงก์เราเลย (84.32.41.136 ใช้ไป 1,368 โดเมน)
+//   - ฟาร์มกดลิงก์: IPv6 /64 เดียว หรือ IP คลาวด์ กด 50-130 alias/วัน (ปั่นยอดคลิก ไม่ปลอม referrer)
+// เกณฑ์ปรับจากข้อมูลจริง 30 วัน (185,017 IP): ผู้ใช้จริงบน CGNAT มือถือใช้ referrer สูงสุด ~17 โดเมน/วัน
+// แต่เป็น UA มือถือ — บอททั้งหมดเป็น UA เดสก์ท็อป จึงแยกได้ชัด ส่วน alias/วัน ผู้ใช้จริงไม่ถึง 25
+// ==========================================
+const BlockedIp = require('./models/BlockedIp');
+const BEHAVIOR_WINDOW_MS = 24 * 3600e3;
+const MAX_REFERRERS_DESKTOP = 15; // UA เดสก์ท็อป + referrer ต่างกัน >= นี้ ใน 24 ชม. = บอทใส่ Referer ปลอม
+const MAX_ALIASES_PER_DAY = 25;   // กดลิงก์ต่างกัน >= นี้ ใน 24 ชม. = ฟาร์มกดลิงก์
+const ipBehavior = new Map();     // key → { refs:Set, aliases:Set, since }
+const blockedCache = new Map();   // ipAddress/prefix/CIDR → reason (โหลดจากตาราง BlockedIps ทุก 60 วิ)
+
+const { ipKey, inCidr4 } = require('./utils/ip'); // key IPv6 = /64 (เติม 0 ครบ 4 หลัก) — ต้องตรงกับที่ admin/สคริปต์บันทึก
+
+function getBlockReason(ip, key) {
+  if (blockedCache.has(ip)) return blockedCache.get(ip);
+  if (blockedCache.has(key)) return blockedCache.get(key);
+  for (const [entry, reason] of blockedCache) {
+    if (entry.includes('/') && !entry.includes(':') && inCidr4(ip, entry)) return reason;
+  }
+  return null;
+}
+
+async function reloadBlocklist() {
+  try {
+    const rows = await BlockedIp.findAll({ attributes: ['ipAddress', 'reason'], raw: true });
+    blockedCache.clear();
+    rows.forEach(r => blockedCache.set(r.ipAddress, r.reason || 'blocklist'));
+  } catch (err) { console.error('Blocklist reload error:', err.message); }
+}
+setInterval(reloadBlocklist, 60000);
+
+// เข้ากฎแล้วจำไว้ในตาราง ให้โดนบล็อกต่อเนื่องแม้ restart (admin ปลดได้ที่ /api/admin/blocked-ips)
+function autoBlock(key, reason) {
+  blockedCache.set(key, reason);
+  BlockedIp.findOrCreate({ where: { ipAddress: key }, defaults: { reason: `auto:${reason}` } })
+    .catch(err => console.error('Auto-block save error:', err.message));
+}
+
+// ประเมินพฤติกรรมใน 24 ชม. — คืนเหตุผลถ้าเป็นบอท
+function checkBehavior(key, ua, refHost, alias, now) {
+  let b = ipBehavior.get(key);
+  if (!b || now - b.since > BEHAVIOR_WINDOW_MS) { b = { refs: new Set(), aliases: new Set(), since: now }; ipBehavior.set(key, b); }
+  if (refHost) b.refs.add(refHost);
+  b.aliases.add(alias);
+  const isDesktop = !/mobile|android|iphone|ipad/.test(ua);
+  if (isDesktop && b.refs.size >= MAX_REFERRERS_DESKTOP) return 'fakeRef';
+  if (b.aliases.size >= MAX_ALIASES_PER_DAY) return 'manyAlias';
+  return null;
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, b] of ipBehavior) if (now - b.since > BEHAVIOR_WINDOW_MS) ipBehavior.delete(key);
+}, 10 * 60 * 1000);
+
 // 🔎 [ชั่วคราว] หน้าดูหลักฐาน Domain Proof (เปิดผ่าน /api ให้ nginx proxy ไป backend แน่นอน) — ถอดออกเมื่อเทสเสร็จ
 app.get('/api/domain-proof.html', (req, res) => {
   if (req.query.key !== PROOF_KEY) return res.status(403).send('Forbidden');
@@ -201,10 +260,26 @@ app.get('/:alias', async (req, res) => {
       ipClickTracker.set(clientIp, { count: 1, timestamp: now });
     }
 
+    // ด่านที่ 4: blocklist (IP / IPv6 prefix / CIDR ที่พิสูจน์แล้วว่าเป็นบอท + ที่ระบบ auto-add)
+    // ด่านที่ 5: พฤติกรรม 24 ชม. (Referer ปลอมหลายโดเมน / กดหลาย alias) — ดู comment ด้านบน
+    const firstIp = String(clientIp).split(',')[0].trim();
+    const behaviorKey = ipKey(firstIp);
+    let behaviorReason = null;
+    if (!isBot && !isSpam) {
+      behaviorReason = getBlockReason(firstIp, behaviorKey);
+      if (!behaviorReason) {
+        let refHost = '';
+        try { refHost = new URL(req.get('Referer') || req.get('Referrer') || '').hostname.replace(/^www\./, ''); } catch (e) { /* ไม่มี/ผิดรูปแบบ */ }
+        behaviorReason = checkBehavior(behaviorKey, ua, refHost, link.alias, now);
+        if (behaviorReason) autoBlock(behaviorKey, behaviorReason);
+      }
+    }
+
     // 🥷 ทำงานแบบแบนเงียบ (Silent Pass)
-    if (isBot || isSpam) {
-      console.log(`🛡️ [Anti-Bot] ดักจับผู้ต้องสงสัย IP: ${clientIp} | Bot: ${isBot} (list:${inBotList} noBrowser:${notBrowser} noLang:${noAcceptLang}) | Spam: ${isSpam} | UA: ${ua.slice(0, 80)} (ส่งผ่านแต่ไม่บันทึกสถิติ)`);
-      recordProof({ t: new Date().toISOString(), alias: link.alias, status: 'blocked', reason: isSpam ? 'spam' : (inBotList ? 'botlist' : notBrowser ? 'noBrowser' : 'noLang'), ref: '', rawRef: req.get('Referer') || req.get('Referrer') || '', ip: clientIp, ua: req.get('user-agent') || '' });
+    if (isBot || isSpam || behaviorReason) {
+      const reason = isSpam ? 'spam' : inBotList ? 'botlist' : notBrowser ? 'noBrowser' : noAcceptLang ? 'noLang' : behaviorReason;
+      console.log(`🛡️ [Anti-Bot] ดักจับผู้ต้องสงสัย IP: ${clientIp} | reason: ${reason} | UA: ${ua.slice(0, 80)} (ส่งผ่านแต่ไม่บันทึกสถิติ)`);
+      recordProof({ t: new Date().toISOString(), alias: link.alias, status: 'blocked', reason, ref: '', rawRef: req.get('Referer') || req.get('Referrer') || '', ip: clientIp, ua: req.get('user-agent') || '' });
       return res.redirect(301, finalUrl);
     }
 
@@ -266,8 +341,10 @@ app.get('/:alias', async (req, res) => {
 });
 
 const PORT = 5000;
-sequelize.sync().then(() => {
+sequelize.sync().then(async () => {
   console.log('📦 Database Tables Synced Successfully!');
+  await reloadBlocklist(); // โหลด blocklist ก่อนเปิดรับคลิก
+  console.log(`🛡️ Blocklist loaded: ${blockedCache.size} รายการ`);
   app.listen(PORT, () => {
     console.log(`🚀 Yoalink Core Backend running on port ${PORT} with High Security Mode`);
   });

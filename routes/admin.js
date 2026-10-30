@@ -272,4 +272,36 @@ router.post('/links/transfer-by-alias', [auth, isAdmin], async (req, res) => {
   }
 });
 
+// ==========================================
+// 🛡️ Blocklist IP กันบอท (server.js โหลดตารางนี้ทุก 60 วิ) — รองรับ IP, IPv6 prefix "xxxx:xxxx:xxxx:xxxx::/64", IPv4 CIDR "a.b.c.0/24"
+// ==========================================
+const BlockedIp = require('../models/BlockedIp');
+const { normalizeBlockEntry } = require('../utils/ip');
+
+router.get('/blocked-ips', [auth, isAdmin], async (req, res) => {
+  try { res.json(await BlockedIp.findAll({ order: [['id', 'DESC']] })); }
+  catch (error) { res.status(500).json({ message: 'Error fetching blocked IPs' }); }
+});
+
+router.post('/blocked-ips', [auth, isAdmin], async (req, res) => {
+  try {
+    const raw = String(req.body.ipAddress || '').trim();
+    if (!/^[0-9a-fA-F.:/]+$/.test(raw) || raw.length > 60) return res.status(400).json({ message: 'รูปแบบ IP ไม่ถูกต้อง' });
+    const ipAddress = normalizeBlockEntry(raw); // IPv6 → key /64 แบบเดียวกับ server.js
+    const [row, created] = await BlockedIp.findOrCreate({ where: { ipAddress }, defaults: { reason: String(req.body.reason || 'manual').slice(0, 200) } });
+    await createAuditLog(req, 'BLOCK_IP', { ipAddress, reason: row.reason });
+    res.status(created ? 201 : 200).json(row);
+  } catch (error) { res.status(500).json({ message: 'Error adding blocked IP' }); }
+});
+
+router.delete('/blocked-ips/:id', [auth, isAdmin], async (req, res) => {
+  try {
+    const row = await BlockedIp.findByPk(req.params.id);
+    if (!row) return res.status(404).json({ message: 'ไม่พบรายการ' });
+    await createAuditLog(req, 'UNBLOCK_IP', { ipAddress: row.ipAddress, reason: row.reason });
+    await row.destroy();
+    res.json({ message: 'ปลดบล็อกแล้ว (มีผลภายใน 60 วินาที)' });
+  } catch (error) { res.status(500).json({ message: 'Error removing blocked IP' }); }
+});
+
 module.exports = router;
