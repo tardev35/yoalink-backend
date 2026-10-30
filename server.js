@@ -344,7 +344,7 @@ app.get('/:alias', async (req, res) => {
 });
 
 const PORT = 5000;
-sequelize.sync().then(async () => {
+sequelize.initPragmas().then(() => sequelize.sync()).then(async () => {
   console.log('📦 Database Tables Synced Successfully!');
   await reloadBlocklist(); // โหลด blocklist ก่อนเปิดรับคลิก
   console.log(`🛡️ Blocklist loaded: ${blockedCache.size} รายการ`);
