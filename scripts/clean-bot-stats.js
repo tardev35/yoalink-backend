@@ -22,6 +22,7 @@ const LOG = path.join(__dirname, '..', 'domain-proof.log');
 const DB = path.join(__dirname, '..', 'database.sqlite');
 const MAX_REFERRERS_DESKTOP = 15;
 const MAX_ALIASES_PER_DAY = 25;
+const MAX_ALIASES_NO_REF = 15; // ไม่มี referrer เลย + alias >= นี้ = ฟาร์มกดตรง (เหมือน server.js)
 
 // IP/prefix ที่พิสูจน์จากการวิเคราะห์ 30 ก.ค.–30 ต.ค. 2026 (datacenter + ฟาร์มกดลิงก์)
 const STATIC_BLOCK = {
@@ -31,6 +32,7 @@ const STATIC_BLOCK = {
   '102.209.119.233': 'fakeRef', '102.209.118.123': 'fakeRef', '103.102.119.61': 'fakeRef',
   '205.147.27.0/24': 'fakeRef (datacenter range)',
   '2407:b1c0:0dc0:82af::/64': 'linuxFarm (133 alias/วัน)', '2407:b1c0:0dc1:15da::/64': 'linuxFarm',
+  '2602:fa5d:0000:0000::/64': 'directFarm (1,010 คลิก/17 วัน ไม่มี referrer)',
 };
 
 const { ipKey, inCidr4 } = require('../utils/ip');
@@ -66,6 +68,7 @@ async function scan(onEntry) {
       if (flagged.has(key)) continue;
       if (b.desktop && b.refs.size >= MAX_REFERRERS_DESKTOP) flagged.set(key, `fakeRef (${b.refs.size} โดเมน/วัน)`);
       else if (b.aliases.size >= MAX_ALIASES_PER_DAY) flagged.set(key, `manyAlias (${b.aliases.size} alias/วัน)`);
+      else if (b.refs.size === 0 && b.aliases.size >= MAX_ALIASES_NO_REF) flagged.set(key, `directFarm (${b.aliases.size} alias/วัน ไม่มี referrer)`);
     }
     dayMap = new Map();
   };

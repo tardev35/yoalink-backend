@@ -106,6 +106,8 @@ const BlockedIp = require('./models/BlockedIp');
 const BEHAVIOR_WINDOW_MS = 24 * 3600e3;
 const MAX_REFERRERS_DESKTOP = 15; // UA เดสก์ท็อป + referrer ต่างกัน >= นี้ ใน 24 ชม. = บอทใส่ Referer ปลอม
 const MAX_ALIASES_PER_DAY = 25;   // กดลิงก์ต่างกัน >= นี้ ใน 24 ชม. = ฟาร์มกดลิงก์
+const MAX_ALIASES_NO_REF = 15;    // ไม่มี referrer เลยทั้งวัน + กด >= นี้ alias = ฟาร์มกดตรง (ฟาร์ม "Android 12; Pixel 6" บน Google Cloud กด 15-26 alias/วัน
+                                  // ผู้ใช้จริงที่กดหลายลิงก์มักมาจากหน้าเว็บ → มี referrer; ข้อมูล 30 วัน: ลายเซ็นนี้ 15 IP เป็นบอททั้งหมด)
 const ipBehavior = new Map();     // key → { refs:Set, aliases:Set, since }
 const blockedCache = new Map();   // ipAddress/prefix/CIDR → reason (โหลดจากตาราง BlockedIps ทุก 60 วิ)
 
@@ -145,6 +147,7 @@ function checkBehavior(key, ua, refHost, alias, now) {
   const isDesktop = !/mobile|android|iphone|ipad/.test(ua);
   if (isDesktop && b.refs.size >= MAX_REFERRERS_DESKTOP) return 'fakeRef';
   if (b.aliases.size >= MAX_ALIASES_PER_DAY) return 'manyAlias';
+  if (b.refs.size === 0 && b.aliases.size >= MAX_ALIASES_NO_REF) return 'directFarm';
   return null;
 }
 setInterval(() => {
